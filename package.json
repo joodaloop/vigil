@@ -1,0 +1,24 @@
+{
+    "name": "analytics",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite dev",
+        "build": "vite build",
+        "preview": "vite preview",
+        "deploy": "vite build && wrangler deploy",
+        "types:gen": "wrangler types"
+    },
+    "dependencies": {
+        "dayjs": "^1.11.11",
+        "solid-js": "^1.9.13",
+        "ua-parser-js": "^1.0.38"
+    },
+    "devDependencies": {
+        "@cloudflare/vite-plugin": "^1.39.0",
+        "@cloudflare/workers-types": "^4.20250803.0",
+        "typescript": "^5.7.2",
+        "vite": "^8.0.14",
+        "vite-plugin-solid": "^2.11.12"
+    }
+}
