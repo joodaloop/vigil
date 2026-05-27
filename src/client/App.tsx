@@ -26,6 +26,7 @@ export function App() {
     const [referrers, setReferrers] = createSignal<Row[]>([]);
     const [countries, setCountries] = createSignal<Row[]>([]);
     const [browsers, setBrowsers] = createSignal<Row[]>([]);
+    const [devices, setDevices] = createSignal<Row[]>([]);
 
     function updateSiteId(value: string) {
         setSiteId(value);
@@ -55,12 +56,13 @@ export function App() {
         setError(false);
         setStatus("Loading…");
         try {
-            const [c, p, r, co, b] = await fetchAll(siteId(), interval());
+            const [c, p, r, co, b, d] = await fetchAll(siteId(), interval());
             setCounts(c);
             setPaths(p);
             setReferrers(r);
             setCountries(co);
             setBrowsers(b);
+            setDevices(d);
             setStatus("");
         } catch (e) {
             setError(true);
@@ -133,6 +135,12 @@ export function App() {
                 <TopList
                     title="Browsers"
                     rows={browsers()}
+                    label={(r) => r[0] || "Unknown"}
+                    value={(r) => r[1].toLocaleString()}
+                />
+                <TopList
+                    title="Devices"
+                    rows={devices()}
                     label={(r) => r[0] || "Unknown"}
                     value={(r) => r[1].toLocaleString()}
                 />
