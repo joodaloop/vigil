@@ -30,5 +30,6 @@ export function fetchAll(siteId: string, interval: string) {
         get<Row[]>("/api/countries", params),
         get<Row[]>("/api/browsers", params),
         get<Row[]>("/api/devices", params),
+        get<Row[]>("/api/timeseries", params),
     ]);
 }

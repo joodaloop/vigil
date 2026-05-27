@@ -1,5 +1,7 @@
 import { collectRequestHandler } from "../analytics/collect";
 import { AnalyticsEngineAPI } from "../analytics/query";
+import { getFixture } from "./fixtures";
+import { resolveTimeseriesWindow } from "./interval";
 
 export default {
     async fetch(request: Request, env: Env, _ctx: ExecutionContext) {
@@ -22,19 +24,25 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 async function handleApiRequest(url: URL, env: Env): Promise<Response> {
-    const api = new AnalyticsEngineAPI(
-        env.CF_ACCOUNT_ID,
-        env.CF_BEARER_TOKEN,
-    );
+    const corsHeaders = {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "application/json",
+    };
 
     const siteId = url.searchParams.get("siteId") ?? "";
     const interval = url.searchParams.get("interval") ?? "7d";
     const tz = url.searchParams.get("tz") ?? "Etc/UTC";
 
-    const corsHeaders = {
-        "Access-Control-Allow-Origin": "*",
-        "Content-Type": "application/json",
-    };
+    if (!env.CF_ACCOUNT_ID || !env.CF_BEARER_TOKEN) {
+        const data = getFixture(url.pathname, interval, tz);
+        if (data === undefined) return new Response("Not found", { status: 404 });
+        return Response.json(data, { headers: corsHeaders });
+    }
+
+    const api = new AnalyticsEngineAPI(
+        env.CF_ACCOUNT_ID,
+        env.CF_BEARER_TOKEN,
+    );
 
     try {
         switch (url.pathname) {
@@ -43,13 +51,10 @@ async function handleApiRequest(url: URL, env: Env): Promise<Response> {
                 return Response.json(counts, { headers: corsHeaders });
             }
             case "/api/timeseries": {
-                const intervalType = interval === "today" || interval === "yesterday" || interval === "1d"
-                    ? "HOUR"
-                    : "DAY";
-                const now = new Date();
-                const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-                const rows = await api.getViewsGroupedByInterval(siteId, intervalType, start, now, tz);
-                return Response.json(rows, { headers: corsHeaders });
+                const { intervalType, start, end } = resolveTimeseriesWindow(interval, tz);
+                const rows = await api.getViewsGroupedByInterval(siteId, intervalType, start, end, tz);
+                const reshaped: [string, number][] = rows.map(([bucket, counts]) => [bucket, counts.views]);
+                return Response.json(reshaped, { headers: corsHeaders });
             }
             case "/api/paths": {
                 const page = Number(url.searchParams.get("page") ?? 1);
