@@ -222,8 +222,15 @@ select option {
   display: grid;
   grid-template-columns: repeat(3, auto) minmax(0, 1fr);
   column-gap: 0.6rem;
-  align-items: center;
+  /* A chart's baseline is its bottom edge, so this sits it on the numbers'
+     baseline; pulled down by its padding (Chart's ceil(lineWidth)) so its
+     zero line is what lands there. */
+  align-items: last baseline;
   font-weight: 500;
+}
+
+.host-nums .chart {
+  margin-bottom: -2px;
 }
 
 /* ---- Panel ---- */
