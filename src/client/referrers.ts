@@ -32,7 +32,10 @@ const NAMES: Record<string, string> = {
     "claude.ai": "Claude",
 };
 
+// A source is a referring site's domain, or for a click within the site, the
+// path of the page it came from, shown as in the pages list ("posts/x").
 export function referrerName(domain: string): string {
+    if (domain.startsWith("/")) return domain.replace(/^\/+|\/+$/g, "") || "/";
     for (let d = domain; d.includes("."); d = d.slice(d.indexOf(".") + 1)) {
         if (NAMES[d]) return NAMES[d];
     }

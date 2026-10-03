@@ -5,9 +5,10 @@ fed by a tracker that only counts a page view once the reader scrolls.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/joodaloop/vigil)
 
-- **Schema and query recipes:** [`migrations/0001_init.sql`](migrations/0001_init.sql), plus the
-  dashboard's per-host counters in [`migrations/0002_counters.sql`](migrations/0002_counters.sql)
-- **Collector:** `src/worker/collect.ts` (`POST /_v/hit`, `POST /_v/end`)
+- **Schema:** [`migrations/0002_views.sql`](migrations/0002_views.sql), which reshapes the
+  original [`0001_init.sql`](migrations/0001_init.sql): raw `hits`, and the per-site counts
+  the dashboard reads
+- **Collector:** `src/worker/collect.ts` (`POST /_v/hit`, `POST /_v/read`)
 - **Tracker:** `src/tracker/v.js`, served at `/_v/v.js`
 - **Dashboard:** `src/client/` (Solid), API goes in `src/worker/index.ts` under `/api/*`
 
@@ -15,37 +16,36 @@ fed by a tracker that only counts a page view once the reader scrolls.
 
 - The tracker sends a page view on the first scroll that follows real input
   (wheel, touch, key, pointer), so scroll restoration and anchor jumps don't count.
-- When the page is hidden it sends a beacon with visible seconds and max scroll
-  depth, which updates that hit.
-- The Worker sets one HttpOnly cookie, `_v = visitorId.entryHitId.lastPage`,
-  on the site's root domain, so all subdomains share a visitor.
-- A hit with an external or empty referrer starts a new *trip*; internal clicks
-  point back to the trip's first hit via `entry_hit_id`.
+- Once the page has been on screen for 30 seconds, the view also counts as
+  *read*. Set the threshold per page with `data-read-after` on the script tag
+  (in seconds); reads are only comparable between pages with the same one.
+- Each site (hostname) is counted on its own. The Worker sets one HttpOnly
+  cookie per site holding the visitor's id, so a reader on two subdomains is
+  two visitors.
+- Each view records where it came from: the referring site, or for a click
+  within the site, the previous page. Pick a page on the dashboard to see where
+  its readers came from; pick one of your pages as a source to see where its
+  readers went next.
+- Each hit also adds to a few per-day counts, so the dashboard sums those
+  rather than reading hits. Unique visitors can't be summed, so they're only
+  shown without a page or referrer filter.
 - Country comes from the browser's timezone. No IPs are read or stored.
 
 ## Adding a site (Netlify)
 
 1. Edit `vars.SITES` in [`wrangler.json`](wrangler.json). Replace the local
-   example with your site root and the hosts you want on the dashboard:
+   example with each hostname you want counted, and the name to show for it:
 
    ```json
    "vars": {
        "SITES": [
-           {
-               "site": "example.co.uk",
-               "hosts": [
-                   { "host": "example.co.uk", "name": "Example" },
-                   { "host": "blog.example.co.uk", "name": "Blog" }
-               ]
-           }
+           { "host": "example.co.uk", "name": "Example" },
+           { "host": "blog.example.co.uk", "name": "Blog" }
        ]
    }
    ```
 
-   Each host gets its own panel on the dashboard, and only listed hosts are
-   collected. The `site` is the cookie domain its hosts share, so a reader
-   keeps one identity (and one trip) across them; every host must be the site
-   itself or one of its subdomains. Add another entry for each separate domain.
+   Only listed hostnames are collected; each gets its own panel.
 
 2. Proxy `/_v/*` to the Worker, in the site's `_redirects`:
 
@@ -58,6 +58,9 @@ fed by a tracker that only counts a page view once the reader scrolls.
    ```html
    <script defer src="/_v/v.js"></script>
    ```
+
+   Add `data-read-after="60"` to change how many seconds on screen count as a
+   read (default 30), e.g. longer on long essays.
 
 The proxy is what makes the cookie first-party; without it, visitor
 tracking won't work.
@@ -80,8 +83,8 @@ pnpm wrangler d1 execute DB --local --command "SELECT * FROM hits"
 
 ## Configuration
 
-- `vars.SITES` in [`wrangler.json`](wrangler.json) is the single site configuration
-  used by the collector and dashboard. The Worker serves its display data at
+- `vars.SITES` in [`wrangler.json`](wrangler.json) lists the sites the collector
+  accepts and the dashboard shows. The Worker serves its display data at
   `/api/config`. Its default `localhost` entry supports local testing. Keep it
   while testing locally, then replace or remove it before deploying.
 - `database_id` in `wrangler.json` starts as an all-zero placeholder. The deploy

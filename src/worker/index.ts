@@ -1,5 +1,5 @@
 import { handleApi } from "./api";
-import { handleEnd, handleHit } from "./collect";
+import { handleHit, handleRead } from "./collect";
 import { testPage } from "./test-page";
 import tracker from "../tracker/v.js?raw";
 
@@ -18,15 +18,15 @@ export default {
                 },
             });
         }
-        if ((pathname === "/_v/hit" || pathname === "/_v/end") && !env.COOKIE_SECRET) {
+        if ((pathname === "/_v/hit" || pathname === "/_v/read") && !env.COOKIE_SECRET) {
             // Without it cookies can't be signed or checked; fail loudly.
             return new Response("COOKIE_SECRET is not set", { status: 500 });
         }
         if (pathname === "/_v/hit" && request.method === "POST") {
             return handleHit(request, env);
         }
-        if (pathname === "/_v/end" && request.method === "POST") {
-            return handleEnd(request, env);
+        if (pathname === "/_v/read" && request.method === "POST") {
+            return handleRead(request, env);
         }
         if (pathname.startsWith("/_v/test") && env.VIGIL_DEV === "1") {
             return testPage(url);

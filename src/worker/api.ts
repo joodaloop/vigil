@@ -1,50 +1,37 @@
 import type { HostStats, HostSummaries, Overview, PageRow, Referrer } from "../shared/types";
-import { lookupIds } from "./strings";
+import { filteredVisitors } from "./filtered";
+import { configuredSites } from "./sites";
 
 // GET /api/overview?host=blog.example.co.uk&days=30
-//   Totals, daily series, referrers and pages for one host.
+//   Totals, daily series, referrers and pages for one site.
 // GET /api/hosts?days=30
-//   Headline totals and daily series for every configured host, unfiltered.
+//   Headline totals and daily series for every configured site, unfiltered.
 //
-// Everything is per host. Sites (cookie domains) only matter when collecting.
+// Both cover the last `days` UTC days (today included). The overview takes
+// optional `ref` (referrer domain) and `page` (path) filters.
 //
-// Both cover the last `days` UTC days (today included) and run their queries
-// in one D1 batch. The overview takes optional `ref` (referrer domain) and
-// `page` (path) filters.
-//
-// Unfiltered numbers come from the counter tables (migrations/0002), which
-// the collector keeps up to date: a few rows per day plus one per visitor.
-// Filtered ones scan `hits` in the period.
+// Every number is a SUM over `views` (migrations/0002_views.sql), except
+// unique visitors: unfiltered, a count of `visitors`; under a filter, a count
+// of the filter's hits (filtered.ts), since readers can't be summed. A source is another site's domain, or on a click within the
+// site, the path of the page it came from (paths start with "/").
 
-// ?1 = lo hit id, ?2 = period start (unix s), ?3 = host id
-const RANGE = `h.id >= ?1 AND h.ts >= ?2 AND h.host = ?3`;
-
-// A new visitor's hit that was their only one on the host, ever.
-const BOUNCED = `h.is_new AND (SELECT hits FROM visitor_hosts v
-    WHERE v.visitor_id = h.visitor_id AND v.host = h.host) = 1`;
-
-type ReferrerRow = { domain: string; day: number; visits: number };
-type DailyRow = { day: number; views: number; visitors: number; new: number };
-type TotalRow = {
-    views: number;
-    visitors: number;
-    scroll: number | null;
-    engaged: number | null;
-    new_bounced: number;
-};
-type DeviceRow = { device: string | null; visitors: number };
-type PageDayRow = { page: string; day: number; views: number; new: number };
-type CountedDayRow = DailyRow & { engaged_sum: number; scroll_sum: number; samples: number };
-type CountedDeviceRow = DeviceRow & { bounced: number };
-type HostDailyRow = DailyRow & { host: string };
+type ViewsRow = { day: number; page: string; source: string; views: number; new: number; visitors: number; reads: number };
+type DeviceRow = { device: string | null; visitors: number; bounced: number };
+type HostDailyRow = { host: string; day: number; views: number; visitors: number; new: number };
 type HostVisitorsRow = { host: string; visitors: number };
+
+// The first day (UTC day number) of the last `numDays`, and each day's start
+// in unix seconds.
+function period(numDays: number) {
+    const firstDay = Math.floor(Date.now() / 1000 / 86400) - numDays + 1;
+    return { firstDay, days: Array.from({ length: numDays }, (_, i) => (firstDay + i) * 86400) };
+}
 
 function emptyHost(n: number): HostStats {
     return {
         totals: {
             views: 0,
-            avgScrollPct: null,
-            avgEngagedS: null,
+            reads: 0,
             visitors: 0,
             devices: { desktop: 0, tablet: 0, mobile: 0 },
             new: 0,
@@ -56,33 +43,6 @@ function emptyHost(n: number): HostStats {
     };
 }
 
-// The period and filters both endpoints share. `ids` are the strings ids of
-// `names` (and ref, kept separately); unknown ones come back as -1.
-async function period(env: Env, numDays: number, ref: string | null, names: string[]) {
-    const today = Math.floor(Date.now() / 1000 / 86400);
-    const firstDay = today - numDays + 1;
-    const start = firstDay * 86400;
-    const days = Array.from({ length: numDays }, (_, i) => (firstDay + i) * 86400);
-
-    const ids = await lookupIds(env.DB, [...names, ...(ref ? [ref] : [])]);
-    const refId = ref ? ids.pop()! : null;
-    const lo = await env.DB.prepare("SELECT first_hit_id FROM days WHERE day >= ? ORDER BY day LIMIT 1")
-        .bind(firstDay)
-        .first<number>("first_hit_id");
-
-    // The referrer filter keeps hits whose trip arrived from `ref`, bound
-    // after the query's own parameters (`n` of them, from ?1).
-    //
-    // NOT INDEXED: scan `h` by id range only, so a query reads (and is billed
-    // for) the period's hits rather than walking an index over all of them.
-    const from = (n: number) =>
-        ref ? `hits h NOT INDEXED JOIN hits e ON e.id = h.entry_hit_id AND e.src = ?${n + 1}` : `hits h NOT INDEXED`;
-    const bind = (sql: string, params: unknown[], filtered = true) =>
-        env.DB.prepare(sql).bind(...params, ...(filtered && ref ? [refId] : []));
-
-    return { firstDay, start, days, ids, lo, from, bind, empty: lo === null };
-}
-
 async function overview(
     env: Env,
     host: string,
@@ -90,166 +50,95 @@ async function overview(
     ref: string | null,
     page: string | null,
 ): Promise<Overview> {
-    const p = await period(env, numDays, ref, page ? [host, host + page] : [host]);
-    const result: Overview = { days: p.days, ref, page, stats: emptyHost(numDays) };
-    const [hostId, pageId] = p.ids;
-    if (p.empty || hostId < 0) return result;
-
-    // Raw queries: ?4 = referrer, when filtering.
-    const params = [p.lo, p.start, hostId];
-    const FROM = p.from(3);
-    const SEL = RANGE;
-    // The page filter. Ids come from the database as integers, so it's safe
-    // to put in the SQL; an unknown page (-1) matches nothing.
-    const ON_PAGE = page ? `AND h.page = ${pageId}` : "";
-    const q = (sql: string, filtered = true) => p.bind(sql, params, filtered);
-    // Counter queries: ?1 = first day, ?2 = host id.
-    const c = (sql: string) => env.DB.prepare(sql).bind(p.firstDay, hostId);
-
-    // Each list ignores its own filter, so every option stays listed while
-    // one is picked; a list with no other filter on it reads the counters.
-    const counted = !ref && !page;
-    const [referrers, pages, daily, people, totals] = (await env.DB.batch([
-        // Visits (trips) by the referrer they arrived from: those that start on
-        // this host or, with a page picked, that reach that page.
-        page
-            ? q(
-                  `SELECT s.value AS domain, g.day, g.visits FROM (
-                       SELECT e.src, h.ts / 86400 AS day, COUNT(DISTINCT h.entry_hit_id) AS visits
-                       FROM hits h NOT INDEXED JOIN hits e ON e.id = h.entry_hit_id
-                       WHERE ${SEL} ${ON_PAGE} AND e.src IS NOT NULL
-                       GROUP BY e.src, day
-                   ) g JOIN strings s ON s.id = g.src`,
-                  false,
-              )
-            : c(`SELECT s.value AS domain, r.day, r.visits
-                 FROM ref_daily r JOIN strings s ON s.id = r.src
-                 WHERE r.host = ?2 AND r.day >= ?1`),
-        // Views and new visitors per page and day.
-        ref
-            ? q(`SELECT p.value AS page, g.day, g.views, g.new FROM (
-                     SELECT h.page, h.ts / 86400 AS day, COUNT(*) AS views, SUM(h.is_new) AS new
-                     FROM ${FROM} WHERE ${SEL} GROUP BY h.page, day
-                 ) g JOIN strings p ON p.id = g.page`)
-            : c(`SELECT p.value AS page, d.day, d.views, d.new
-                 FROM page_daily d JOIN strings p ON p.id = d.page
-                 WHERE d.host = ?2 AND d.day >= ?1`),
-        counted
-            ? c(`SELECT day, views, visitors, new, engaged_sum, scroll_sum, samples
-                 FROM host_daily WHERE host = ?2 AND day >= ?1`)
-            : q(`SELECT h.ts / 86400 AS day, COUNT(*) AS views,
-                        COUNT(DISTINCT h.visitor_id) AS visitors, SUM(h.is_new) AS new
-                 FROM ${FROM} WHERE ${SEL} ${ON_PAGE} GROUP BY day`),
-        // Visitors in the period by device: everyone whose latest visit to
-        // the host is in it, since the period ends today.
-        counted
-            ? c(`SELECT d.value AS device, COUNT(*) AS visitors,
-                        SUM(vh.first_seen >= ?1 AND vh.hits = 1) AS bounced
-                 FROM visitor_hosts vh JOIN visitors v ON v.id = vh.visitor_id
-                 LEFT JOIN strings d ON d.id = v.device
-                 WHERE vh.host = ?2 AND vh.last_seen >= ?1 GROUP BY v.device`)
-            : q(`SELECT d.value AS device, g.visitors FROM (
-                     SELECT v.device, COUNT(DISTINCT h.visitor_id) AS visitors
-                     FROM ${FROM} JOIN visitors v ON v.id = h.visitor_id
-                     WHERE ${SEL} ${ON_PAGE} GROUP BY v.device
-                 ) g LEFT JOIN strings d ON d.id = g.device`),
-        ...(counted
-            ? []
-            : [
-                  q(`SELECT COUNT(*) AS views, COUNT(DISTINCT h.visitor_id) AS visitors,
-                            AVG(h.scroll_pct) AS scroll, AVG(h.engaged_s) AS engaged,
-                            SUM(${BOUNCED}) AS new_bounced
-                     FROM ${FROM} WHERE ${SEL} ${ON_PAGE}`),
-              ]),
-    ])) as [
-        D1Result<ReferrerRow>,
-        D1Result<PageDayRow>,
-        D1Result<CountedDayRow>, // only views, visitors and new when filtered
-        D1Result<CountedDeviceRow>, // no bounced when filtered
-        D1Result<TotalRow> | undefined, // filtered only
-    ];
+    const { firstDay, days } = period(numDays);
+    const result: Overview = { days, ref, page, stats: emptyHost(numDays) };
+    const byFilter = ref || page ? filteredVisitors(host, firstDay, page, ref) : null;
+    const [rows, people, filteredDaily] = (await env.DB.batch([
+        // The period's rows, read once; everything below is summed from them.
+        env.DB.prepare(
+            "SELECT day, page, source, views, new, visitors, reads FROM views WHERE host = ? AND day >= ?",
+        ).bind(host, firstDay),
+        // Visitors in the period, by device. Unfiltered: everyone whose
+        // latest visit is in it, since the period ends today, read from the
+        // covering index.
+        byFilter
+            ? env.DB.prepare(byFilter.people).bind(...byFilter.params)
+            : env.DB.prepare(
+                  `SELECT device, COUNT(*) AS visitors, SUM(first_day >= ?2 AND NOT returned) AS bounced
+                   FROM visitors WHERE host = ?1 AND last_day >= ?2 GROUP BY device`,
+              ).bind(host, firstDay),
+        // Filtered, visitors per day; unfiltered, they're summed from `views`.
+        ...(byFilter ? [env.DB.prepare(byFilter.daily).bind(...byFilter.params)] : []),
+    ])) as [D1Result<ViewsRow>, D1Result<DeviceRow>, D1Result<{ day: number; visitors: number }> | undefined];
 
     const stats = result.stats;
+    const t = stats.totals;
+    const byPage = new Map<string, PageRow>();
+    const bySource = new Map<string, Referrer>();
 
-    const refs = new Map<string, Referrer>();
-    for (const r of referrers.results) {
-        let entry = refs.get(r.domain);
-        if (!entry) refs.set(r.domain, (entry = { domain: r.domain, visits: 0, daily: Array(numDays).fill(0) }));
-        entry.visits += r.visits;
-        entry.daily[r.day - p.firstDay] = r.visits;
-    }
-    stats.referrers = [...refs.values()].sort((a, b) => b.visits - a.visits);
+    // Each list ignores its own filter, so every option stays listed while
+    // one is picked.
+    for (const r of rows.results) {
+        const i = r.day - firstDay;
+        const onPage = !page || r.page === page;
+        const onRef = !ref || r.source === ref;
 
-    let engaged = 0;
-    let scroll = 0;
-    let samples = 0;
-    for (const r of daily.results) {
-        const i = r.day - p.firstDay;
-        stats.daily.views[i] = r.views;
-        stats.daily.visitors[i] = r.visitors;
-        stats.daily.new[i] = r.new;
-        stats.totals.views += r.views;
-        stats.totals.new += r.new; // each visitor is new on a host at most once
-        engaged += r.engaged_sum ?? 0;
-        scroll += r.scroll_sum ?? 0;
-        samples += r.samples ?? 0;
+        // The chart and totals: both filters.
+        if (onPage && onRef) {
+            stats.daily.views[i] += r.views;
+            stats.daily.new[i] += r.new;
+            t.views += r.views;
+            t.new += r.new; // each visitor is new on a site at most once
+            t.reads += r.reads;
+            // Unfiltered, each visitor counts once a day across all rows.
+            if (!byFilter) stats.daily.visitors[i] += r.visitors;
+        }
+        // Pages: the source filter only.
+        if (onRef) {
+            let p = byPage.get(r.page);
+            if (!p) byPage.set(r.page, (p = { path: r.page, views: 0, new: 0, daily: Array(numDays).fill(0) }));
+            p.views += r.views;
+            p.new += r.new;
+            p.daily[i] += r.views;
+        }
+        // Where views came from (another site, or the previous page): the
+        // page filter only.
+        if (onPage && r.source) {
+            let s = bySource.get(r.source);
+            if (!s) bySource.set(r.source, (s = { domain: r.source, visits: 0, daily: Array(numDays).fill(0) }));
+            s.visits += r.views;
+            s.daily[i] += r.views;
+        }
     }
+    stats.pages = [...byPage.values()].sort((a, b) => b.views - a.views);
+    stats.referrers = [...bySource.values()].sort((a, b) => b.visits - a.visits);
+
+    for (const r of filteredDaily?.results ?? []) stats.daily.visitors[r.day - firstDay] = r.visitors;
+
     for (const r of people.results) {
-        const d = stats.totals.devices;
+        t.visitors += r.visitors;
+        t.newBounced += r.bounced;
+        const d = t.devices;
         if (r.device === "mobile" || r.device === "tablet") d[r.device] += r.visitors;
         else d.desktop += r.visitors; // desktop, plus rare types (console, smarttv)
     }
-    if (counted) {
-        Object.assign(stats.totals, {
-            visitors: people.results.reduce((n, r) => n + r.visitors, 0),
-            avgScrollPct: samples ? scroll / samples : null,
-            avgEngagedS: samples ? engaged / samples : null,
-            newBounced: people.results.reduce((n, r) => n + r.bounced, 0),
-        });
-    } else if (totals?.results[0]) {
-        const t = totals.results[0];
-        Object.assign(stats.totals, {
-            visitors: t.visitors,
-            avgScrollPct: t.scroll,
-            avgEngagedS: t.engaged,
-            newBounced: t.new_bounced ?? 0,
-        });
-    }
-
-    const byPage = new Map<string, PageRow>();
-    for (const r of pages.results) {
-        let row = byPage.get(r.page);
-        if (!row) {
-            const path = r.page.slice(host.length) || "/"; // "blog.you.com/posts/x" -> "/posts/x"
-            byPage.set(r.page, (row = { path, views: 0, new: 0, daily: Array(numDays).fill(0) }));
-        }
-        row.views += r.views;
-        row.new += r.new;
-        row.daily[r.day - p.firstDay] = r.views;
-    }
-    stats.pages = [...byPage.values()].sort((a, b) => b.views - a.views);
 
     return result;
 }
 
 async function hostSummaries(env: Env, hosts: string[], numDays: number): Promise<HostSummaries> {
-    const p = await period(env, numDays, null, hosts);
-    const result: HostSummaries = { days: p.days, hosts: {} };
-    const ids = p.ids.filter((id) => id >= 0);
-    if (p.empty || ids.length === 0) return result;
+    const { firstDay, days } = period(numDays);
+    const result: HostSummaries = { days, hosts: {} };
+    if (hosts.length === 0) return result;
 
-    // ?1 = first day, then the host ids.
-    const IN = ids.map((_, i) => `?${i + 2}`).join(",");
-    const c = (sql: string) => env.DB.prepare(sql).bind(p.firstDay, ...ids);
+    // ?1 = first day, then the hosts.
+    const IN = hosts.map((_, i) => `?${i + 2}`).join(",");
+    const q = (sql: string) => env.DB.prepare(sql).bind(firstDay, ...hosts);
     const [daily, visitors] = (await env.DB.batch([
-        c(`SELECT s.value AS host, d.day, d.views, d.visitors, d.new
-           FROM host_daily d JOIN strings s ON s.id = d.host
-           WHERE d.host IN (${IN}) AND d.day >= ?1`),
+        q(`SELECT host, day, SUM(views) AS views, SUM(visitors) AS visitors, SUM(new) AS new
+           FROM views WHERE host IN (${IN}) AND day >= ?1 GROUP BY host, day`),
         // Distinct over the whole period; per-day counts would overlap.
-        c(`SELECT s.value AS host, COUNT(*) AS visitors
-           FROM visitor_hosts vh JOIN strings s ON s.id = vh.host
-           WHERE vh.host IN (${IN}) AND vh.last_seen >= ?1
-           GROUP BY vh.host`),
+        q(`SELECT host, COUNT(*) AS visitors FROM visitors WHERE host IN (${IN}) AND last_day >= ?1 GROUP BY host`),
     ])) as [D1Result<HostDailyRow>, D1Result<HostVisitorsRow>];
 
     const zeros = () => Array(numDays).fill(0);
@@ -260,7 +149,7 @@ async function hostSummaries(env: Env, hosts: string[], numDays: number): Promis
         });
     for (const r of daily.results) {
         const h = host(r.host);
-        const i = r.day - p.firstDay;
+        const i = r.day - firstDay;
         h.daily.views[i] = r.views;
         h.daily.visitors[i] = r.visitors;
         h.daily.new[i] = r.new;
@@ -274,18 +163,18 @@ async function hostSummaries(env: Env, hosts: string[], numDays: number): Promis
 
 export async function handleApi(url: URL, env: Env): Promise<Response> {
     const json = (body: unknown) => Response.json(body, { headers: { "Cache-Control": "no-store" } });
-    if (url.pathname === "/api/config") return json({ sites: env.SITES ?? [] });
+    if (url.pathname === "/api/config") return json({ sites: configuredSites(env) });
 
     const days = Math.min(366, Math.max(1, Number(url.searchParams.get("days")) || 30));
-    const ref = url.searchParams.get("ref") || null;
 
     if (url.pathname === "/api/overview") {
         const host = (url.searchParams.get("host") ?? "").toLowerCase();
+        const ref = url.searchParams.get("ref") || null;
         const page = url.searchParams.get("page") || null;
         return json(await overview(env, host, days, ref, page));
     }
     if (url.pathname === "/api/hosts") {
-        const hosts = (env.SITES ?? []).flatMap((s) => s.hosts.map((h) => h.host.toLowerCase()));
+        const hosts = configuredSites(env).map((s) => s.host);
         return json(await hostSummaries(env, hosts, days));
     }
     return new Response("Not found", { status: 404 });

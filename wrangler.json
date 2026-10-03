@@ -21,11 +21,6 @@
         }
     ],
     "vars": {
-        "SITES": [
-            {
-                "site": "localhost",
-                "hosts": [{ "host": "localhost", "name": "Local test" }]
-            }
-        ]
+        "SITES": [{ "host": "localhost", "name": "Local test" }]
     }
 }

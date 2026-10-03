@@ -120,7 +120,7 @@ main {
   padding: 4rem 1.75rem 3rem;
 }
 
-/* Name on the left, period and chart style on the right. */
+/* Name on the left, period on the right. */
 .sidebar-top {
   display: flex;
   align-items: flex-start;
@@ -129,9 +129,9 @@ main {
 }
 
 h1 {
-  margin: 0 auto 0 0; /* pickers to the right */
+  margin: 0 auto 0 0; /* the period to the right */
   font-size: 2.4rem;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1;
   /* Split into the three stat colours, left to right. The background only
@@ -175,27 +175,6 @@ select option {
 .days-label {
   font-size: 0.85rem;
   line-height: 1.2;
-}
-
-/* "Line" over "bars"; the one in use is bold, in the text colour. */
-.chart-kind {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  align-self: flex-end; /* level with the bottom of "days" */
-  width: 3rem; /* fits either word in bold, so switching doesn't shift things */
-}
-
-.chart-kind button {
-  font-size: 0.95rem;
-  line-height: 1.3;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.chart-kind button[aria-pressed="true"] {
-  color: var(--text);
-  font-weight: 700;
 }
 
 /* A host: its name, then views, visitors and new visitors beside a small
@@ -280,7 +259,7 @@ select option {
 h2 {
   margin: 0;
   font-size: 2.4rem;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1;
 }
@@ -296,7 +275,7 @@ h2 {
 
 .big {
   font-size: 1.9rem;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.1;
 }
 

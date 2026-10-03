@@ -1,23 +1,14 @@
 // Visitor state lives in one first-party cookie, set by the Worker through the
 // site's /_v/* proxy so it's HttpOnly and not capped by Safari:
 //
-//   _v = visitorId.entryHitId.lastPage.signature   (~400 days)
+//   vigil = visitorId.signature   (~400 days, this host only)
 //
-// The ids are base36. entryHitId is the arrival hit of the current trip;
-// lastPage is the strings.id of the last page recorded, used as `src` for
-// cross-subdomain clicks where the browser strips the referrer to an origin.
-//
-// The signature is an HMAC-SHA256 of the ids, keyed with the COOKIE_SECRET
-// secret, so a cookie that's been edited or made up is ignored.
+// The id is base36. The signature is an HMAC-SHA256 of it, keyed with the
+// COOKIE_SECRET secret, so a cookie that's been edited or made up is ignored.
 
-const COOKIE = "_v";
+const COOKIE = "vigil";
 const MAX_AGE = 400 * 24 * 60 * 60; // Chrome's cap
 
-export type VisitorState = {
-    visitorId: number;
-    entryHitId: number;
-    lastPage: number;
-};
 
 const encoder = new TextEncoder();
 let cachedKey: { secret: string; key: Promise<CryptoKey> } | null = null;
@@ -57,40 +48,32 @@ function parseId(s: string | undefined): number | null {
     return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
-export async function readState(request: Request, secret: string): Promise<VisitorState | null> {
-    const header = request.headers.get("cookie") ?? "";
-    const match = header.match(/(?:^|;\s*)_v=([0-9a-z]+\.[0-9a-z]+\.[0-9a-z]+)\.([A-Za-z0-9_-]+)/);
+// The visitor id from the request's cookie, or null for a new visitor (or
+// one whose cookie has been edited or made up).
+export async function readVisitor(request: Request, secret: string): Promise<number | null> {
+    const match = (request.headers.get("cookie") ?? "").match(/(?:^|;\s*)vigil=([0-9a-z]+)\.([A-Za-z0-9_-]+)/);
     if (!match) return null;
 
-    const [, payload, sig] = match;
-    const sigBytes = fromBase64Url(sig);
+    const [, payload, signature] = match;
+    const sig = fromBase64Url(signature);
     // crypto.subtle.verify compares in constant time.
-    if (!sigBytes || !(await crypto.subtle.verify("HMAC", await hmacKey(secret), sigBytes, encoder.encode(payload)))) {
+    if (!sig || !(await crypto.subtle.verify("HMAC", await hmacKey(secret), sig, encoder.encode(payload)))) {
         return null;
     }
-
-    const [visitorId, entryHitId, lastPage] = payload.split(".").map(parseId);
-    if (!visitorId || !entryHitId || !lastPage) return null;
-    return { visitorId, entryHitId, lastPage };
+    return parseId(payload);
 }
 
-export async function stateCookie(
-    state: VisitorState,
-    secret: string,
-    domain: string | null,
-    secure: boolean,
-): Promise<string> {
-    const payload = [state.visitorId, state.entryHitId, state.lastPage].map((n) => n.toString(36)).join(".");
+// A random id for a new visitor: no database round trip, and with up to 2^53
+// of them, no realistic chance of two colliding on a host.
+export function newVisitorId(): number {
+    const [hi, lo] = crypto.getRandomValues(new Uint32Array(2));
+    return (hi & 0x1fffff) * 2 ** 32 + lo || 1;
+}
+
+export async function visitorCookie(visitorId: number, secret: string, secure: boolean): Promise<string> {
+    const payload = visitorId.toString(36);
     const sig = toBase64Url(await crypto.subtle.sign("HMAC", await hmacKey(secret), encoder.encode(payload)));
-    return [
-        `${COOKIE}=${payload}.${sig}`,
-        `Max-Age=${MAX_AGE}`,
-        "Path=/",
-        "HttpOnly",
-        "SameSite=Lax",
-        domain ? `Domain=${domain}` : "",
-        secure ? "Secure" : "",
-    ]
+    return [`${COOKIE}=${payload}.${sig}`, `Max-Age=${MAX_AGE}`, "Path=/", "HttpOnly", "SameSite=Lax", secure ? "Secure" : ""]
         .filter(Boolean)
         .join("; ");
 }

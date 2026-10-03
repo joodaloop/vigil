@@ -1,16 +1,12 @@
 import { createMemo, createSignal, Errored, For, isPending, latest, Loading, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import type { HostStats, HostSummaries, Overview, PageRow, Referrer, SiteConfig } from "../shared/types";
+import type { HostStats, HostSummaries, Overview, PageRow, Referrer, Site } from "../shared/types";
 import { Chart, type Line } from "./Chart";
 import { DEFAULT_PERIOD, PERIODS } from "./config";
 import { referrerName } from "./referrers";
 import { nextTheme, theme } from "./theme";
 
-type Host = SiteConfig["hosts"][number];
-
-type ChartKind = "line" | "bars";
-// What's fetched. The chart style isn't part of it, so changing that doesn't
-// refetch.
+// What's shown, and fetched.
 type Query = {
   host: string;
   days: number;
@@ -20,7 +16,7 @@ type Query = {
 
 const initialParams = new URLSearchParams(location.search);
 
-function initialQuery(hosts: Host[]): Query {
+function initialQuery(hosts: Site[]): Query {
   const params = initialParams;
   const n = Number(params.get("days"));
   const host = params.get("host");
@@ -32,11 +28,10 @@ function initialQuery(hosts: Host[]): Query {
   };
 }
 
-function toParams(q: Query, chart: ChartKind) {
+function toParams(q: Query) {
   const params = new URLSearchParams({ host: q.host, days: String(q.days) });
   if (q.ref) params.set("ref", q.ref);
   if (q.page) params.set("page", q.page);
-  if (chart !== "line") params.set("chart", chart);
   return params;
 }
 
@@ -53,21 +48,7 @@ const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFracti
 const num = (n: number) => compact.format(n).replace("K", "k");
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
-function duration(s: number | null) {
-  if (s === null) return "–";
-  return `${Math.round(s)}s`;
-}
-
-// `color` blended into `bg` ("#rrggbb" both), `amount` of the way: a lighter,
-// opaque shade.
-function tint(color: string, bg: string, amount: number) {
-  const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-  const [a, b] = [rgb(color), rgb(bg)];
-  return `rgb(${a.map((v, i) => Math.round(b[i] + (v - b[i]) * amount)).join(",")})`;
-}
-
-// Views, visitors and new visitors. Each is a subset of the one before, so
-// as bars the later ones sit in front.
+// Views, visitors and new visitors.
 function chartLines(
   h: { daily: { views: number[]; visitors: number[]; new: number[] } } | undefined,
 ): Line[] {
@@ -79,13 +60,10 @@ function chartLines(
   ];
 }
 
-export function App(props: { sites: SiteConfig[] }) {
-  // Every dashboard host, in display order.
-  const HOSTS = props.sites.flatMap((s) => s.hosts);
+export function App(props: { sites: Site[] }) {
+  // Every site, in display order.
+  const HOSTS = props.sites;
   const [query, setQuery] = createSignal(initialQuery(HOSTS));
-  const [chart, setChart] = createSignal<ChartKind>(
-    initialParams.get("chart") === "bars" ? "bars" : "line",
-  );
   // The open host in full.
   function fetchOverview(q: Query) {
     return get<Overview>("/api/overview", {
@@ -96,10 +74,6 @@ export function App(props: { sites: SiteConfig[] }) {
     });
   }
 
-  // Headline numbers for every host, for the sidebar. Never filtered.
-  function fetchSummaries(days: number) {
-    return get<HostSummaries>("/api/hosts", { days: String(days) });
-  }
   // The open host's stats, along with the query they answer. While a new
   // query loads, this (and everything drawn from it) keeps showing the last
   // one, so the panel's name, filters, numbers and chart all switch together.
@@ -107,21 +81,17 @@ export function App(props: { sites: SiteConfig[] }) {
     const q = query();
     return { q, overview: await fetchOverview(q) };
   });
-  // Only refetched when the period changes.
+  // Headline numbers for every host, for the sidebar. Never filtered, so only
+  // refetched when the period changes.
   const days = createMemo(() => query().days);
-  const summaries = createMemo(() => fetchSummaries(days()));
+  const summaries = createMemo(() => get<HostSummaries>("/api/hosts", { days: String(days()) }));
   // A new query is on its way: the panel fades a little until it lands.
   const updating = () => isPending(() => view());
 
   function update(change: Partial<Query>) {
     const next = { ...query(), ...change };
     setQuery(next);
-    history.replaceState(null, "", `?${toParams(next, chart())}`);
-  }
-
-  function updateChart(kind: ChartKind) {
-    setChart(kind);
-    history.replaceState(null, "", `?${toParams(query(), kind)}`);
+    history.replaceState(null, "", `?${toParams(next)}`);
   }
 
   // Nothing is shown until both the sidebar and the panel have their first
@@ -153,19 +123,6 @@ export function App(props: { sites: SiteConfig[] }) {
             >
               <For each={PERIODS}>{(n) => <option value={n}>{n} days</option>}</For>
             </select>
-          </div>
-          {/* How the big chart is drawn. */}
-          <div class="chart-kind" role="group" aria-label="Chart style">
-            <For each={["line", "bars"] as const}>
-              {(kind) => (
-                <button
-                  aria-pressed={chart() === kind ? "true" : "false"}
-                  onClick={() => updateChart(kind)}
-                >
-                  {kind}
-                </button>
-              )}
-            </For>
           </div>
         </div>
 
@@ -216,7 +173,6 @@ export function App(props: { sites: SiteConfig[] }) {
           )}
         >
           <Stats
-            bars={chart() === "bars"}
             name={HOSTS.find((h) => h.host === view().q.host)!.name}
             host={view().q.host}
             stats={view().overview.stats}
@@ -235,7 +191,6 @@ export function App(props: { sites: SiteConfig[] }) {
 
 // Totals and chart above, then pages and referrers side by side.
 function Stats(props: {
-  bars: boolean;
   name: string;
   host: string;
   stats: HostStats;
@@ -280,13 +235,14 @@ function Stats(props: {
                 <div class="big">{num(shown("views"))}</div>
                 <div class="big-label">Views</div>
               </div>
+              {/* Read: visible for long enough (30s unless the tracker's
+                  data-read-after says otherwise). */}
               <div class="sub stacked icons">
-                <span title="Average scroll depth">
-                  <PieIcon pct={t().avgScrollPct ?? 0} />{" "}
-                  {t().avgScrollPct == null ? "–" : `${Math.round(t().avgScrollPct!)}%`}
+                <span title="Share of views that were read">
+                  <PieIcon pct={pct(t().reads, t().views)} /> {pct(t().reads, t().views)}%
                 </span>
-                <span title="Average time on page">
-                  <ClockIcon /> {duration(t().avgEngagedS)}
+                <span title="Views that stayed on screen long enough to count as read">
+                  <ClockIcon /> {num(t().reads)} read
                 </span>
               </div>
             </div>
@@ -325,8 +281,6 @@ function Stats(props: {
           height={160}
           headroom={40}
           lineWidth={2}
-          bars={props.bars}
-          dim={(c) => tint(c, theme().surface, 0.35)}
           onHover={setDay}
         />
       </div>
@@ -390,7 +344,7 @@ function Referrers(props: {
             <div class={["referrer", { active: on() }]}>
               <button
                 class="ref-name"
-                title={on() ? "Clear filter" : `Only visits from ${r.domain}`}
+                title={on() ? "Clear filter" : `Only views that came from ${r.domain}`}
                 aria-pressed={on() ? "true" : "false"}
                 onClick={() => props.onSelect(on() ? null : r.domain)}
               >

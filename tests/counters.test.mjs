@@ -2,13 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { COUNT_END, COUNT_HIT, newToHost } from "../src/worker/counters.ts";
+import { COUNT_READ, COUNT_VIEW, COUNT_VISITOR, READ_HIT } from "../src/worker/counters.ts";
+import { filteredVisitors } from "../src/worker/filtered.ts";
 
 const migration = (name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8");
 const init = migration("0001_init.sql");
-const counters = migration("0002_counters.sql");
-const collector = readFileSync(new URL("../src/worker/collect.ts", import.meta.url), "utf8");
-const endSql = collector.match(/`(UPDATE hits SET[\s\S]*?)`/)[1];
+const views = migration("0002_views.sql");
 
 // Deterministic pseudo-random numbers, so a failure reproduces.
 function random(seed) {
@@ -18,192 +17,302 @@ function random(seed) {
     };
 }
 
-// Hits over 60 days: 3 hosts on 2 sites, returning visitors, internal clicks
-// and arrivals from a few referrers, in time order like the collector's.
-// Host 3 moves from site 1 to its own root (site 6) halfway through, as if the
-// config changed; its history should carry over, since counters are per host.
+const HOSTS = ["a.test", "b.test", "c.test"];
+const SITES = ["news.example", "search.example", "mail.example"];
+const PAGES = ["/", "/one", "/two/", "/three", "/four"];
+const DEVICES = ["desktop", "mobile", "tablet"];
+const device = (visitor) => DEVICES[visitor % 3];
+
+// Hits over 60 days on 3 hosts, in time order like the collector's: returning
+// visitors, clicks within a site, and arrivals that are direct or from a few
+// other sites. Some visitors use more than one host (as old site-wide cookies
+// did); each host counts them separately.
 function traffic(n = 3000) {
     const rand = random(42);
-    const pick = (k) => Math.floor(rand() * k);
-    const day0 = 20000;
-    const hosts = [
-        { site: 1, host: 2 },
-        { site: 1, host: 3 },
-        { site: 4, host: 5 },
-    ];
+    const pick = (list) => list[Math.floor(rand() * list.length)];
     const hits = [];
-    const lastTrip = new Map();
-    let ts = day0 * 86400;
+    let ts = 20000 * 86400;
     for (let id = 1; id <= n; id++) {
-        ts += pick((60 * 86400) / n) * 2;
-        const visitor = 1 + pick(400);
-        const { site: configured, host } = hosts[pick(3)];
-        const site = host === 3 && id > n / 2 ? 6 : configured;
-        const trip = lastTrip.get(visitor);
-        const arrival = !trip || rand() < 0.4;
-        const entry = arrival ? id : trip;
-        if (arrival) lastTrip.set(visitor, id);
+        ts += Math.floor(rand() * ((60 * 86400) / n)) * 2;
+        const arrival = rand() < 0.4;
         hits.push({
             id,
             ts,
-            site,
-            host,
-            page: 100 + host * 10 + pick(8),
-            visitor,
-            entry,
-            src: arrival ? [null, 200, 201, 202][pick(4)] : 100,
+            host: pick(HOSTS),
+            page: pick(PAGES),
+            visitor: 1 + Math.floor(rand() * 400),
+            // The referring site, '' if direct, or the previous page.
+            source: arrival ? pick(["", ...SITES]) : pick(PAGES),
         });
     }
     return hits;
 }
 
-function insertVisitors(sql) {
-    sql.exec(`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i + 1 FROM n WHERE i < 400)
-        INSERT INTO visitors (id, first_seen, device) SELECT i, 0, 300 + i % 3 FROM n`);
-}
-
-// What the collector does per hit: insert it with is_new, then the counters.
+// What the collector does per hit (see handleHit): insert it, then count it.
 function collect(sql, hits) {
-    const insert = sql.prepare(
-        `INSERT INTO hits (id, ts, site, host, page, visitor_id, entry_hit_id, src, is_new)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ${newToHost("?6", "?4")})`,
-    );
-    const count = COUNT_HIT.map((s) => sql.prepare(s));
+    const insert = sql.prepare("INSERT INTO hits (id, ts, host, page, visitor_id, source) VALUES (?, ?, ?, ?, ?, ?)");
+    const view = sql.prepare(COUNT_VIEW);
+    const visitor = sql.prepare(COUNT_VISITOR);
     for (const h of hits) {
         sql.exec("BEGIN");
-        insert.run({ 1: h.id, 2: h.ts, 3: h.site, 4: h.host, 5: h.page, 6: h.visitor, 7: h.entry, 8: h.src });
-        for (const s of count) s.run();
+        insert.run(h.id, h.ts, h.host, h.page, h.visitor, h.source);
+        view.run();
+        visitor.run({ 1: null, 2: null, 3: null, 4: device(h.visitor) });
         sql.exec("COMMIT");
     }
 }
 
-// End beacons, repeated, out of order, and some for other visitors' hits.
-function beacons(sql, hits, n = 4000) {
+// Marks a hit read as /_v/read does; returns the rows each statement changed.
+function read(sql, id, visitor) {
+    const params = { 1: id, 2: visitor };
+    sql.exec("BEGIN");
+    const changes = [sql.prepare(COUNT_READ).run(params).changes, sql.prepare(READ_HIT).run(params).changes];
+    sql.exec("COMMIT");
+    return changes;
+}
+
+// Reads, repeated, and some for other visitors' hits.
+function reads(sql, hits, n = 3000) {
     const rand = random(7);
-    const pick = (k) => Math.floor(rand() * k);
-    const counted = sql.prepare(COUNT_END);
-    const update = sql.prepare(endSql);
     for (let i = 0; i < n; i++) {
-        const h = hits[pick(hits.length)];
-        const visitor = rand() < 0.05 ? h.visitor + 1 : h.visitor;
-        const args = [pick(300), pick(101), h.id, visitor];
-        sql.exec("BEGIN");
-        const params = Object.fromEntries(args.map((v, i) => [i + 1, v])); // ?1..?4
-        counted.run(params);
-        update.run(params);
-        sql.exec("COMMIT");
+        const h = hits[Math.floor(rand() * hits.length)];
+        read(sql, h.id, rand() < 0.05 ? h.visitor + 1 : h.visitor);
     }
 }
 
-const dump = (sql, table) => sql.prepare(`SELECT * FROM ${table} ORDER BY 1, 2, 3`).all();
-const TABLES = ["host_daily", "page_daily", "ref_daily", "visitor_hosts"];
+function live(hits) {
+    const sql = new DatabaseSync(":memory:");
+    sql.exec(init);
+    sql.exec(views);
+    collect(sql, hits);
+    return sql;
+}
 
-test("counters kept per hit match the migration's backfill from raw hits", () => {
-    const hits = traffic();
-
-    const live = new DatabaseSync(":memory:");
-    live.exec(init);
-    live.exec(counters);
-    insertVisitors(live);
-    collect(live, hits);
-    beacons(live, hits);
-
-    // Same hits and engagement, counted all at once by the migration.
-    const backfilled = new DatabaseSync(":memory:");
-    backfilled.exec(init);
-    insertVisitors(backfilled);
-    const insert = backfilled.prepare(
-        `INSERT INTO hits (id, ts, site, host, page, visitor_id, entry_hit_id, src, engaged_s, scroll_pct)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+// Hits as the old collector (0001) recorded them, then migrated: text as ids
+// into `strings`, pages as host + path, arrivals pointing at themselves with
+// the referring site in `src`, clicks within the site pointing elsewhere with
+// the previous page in `src`, and visible time standing in for reads (30
+// seconds is a read).
+function migrated(rows) {
+    const sql = new DatabaseSync(":memory:");
+    sql.exec(init);
+    const intern = (value) => {
+        if (value == null || value === "") return null;
+        sql.prepare("INSERT OR IGNORE INTO strings (value) VALUES (?)").run(value);
+        return sql.prepare("SELECT id FROM strings WHERE value = ?").get(value).id;
+    };
+    const visitor = sql.prepare("INSERT OR IGNORE INTO visitors (id, first_seen, device) VALUES (?, 0, ?)");
+    const insert = sql.prepare(
+        `INSERT INTO hits (id, ts, site, host, page, visitor_id, entry_hit_id, src, engaged_s)
+         VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)`,
     );
-    for (const h of live.prepare("SELECT * FROM hits ORDER BY id").all()) {
-        insert.run(h.id, h.ts, h.site, h.host, h.page, h.visitor_id, h.entry_hit_id, h.src, h.engaged_s, h.scroll_pct);
+    for (const h of rows) {
+        visitor.run(h.visitor_id, intern(device(h.visitor_id)));
+        const click = h.source.startsWith("/");
+        const engaged = h.read ? 30 + (h.id % 100) : h.id % 2 ? null : 29;
+        insert.run(
+            h.id,
+            h.ts,
+            intern(h.host),
+            intern(h.host + h.page),
+            h.visitor_id,
+            click ? 0 : h.id,
+            intern(click ? h.host + h.source : h.source),
+            engaged,
+        );
     }
-    backfilled.exec(counters);
+    sql.exec(views);
+    return sql;
+}
 
-    assert.ok(live.prepare("SELECT COUNT(*) AS n FROM hits WHERE engaged_s IS NOT NULL").get().n > 1000);
-    assert.deepEqual(
-        live.prepare("SELECT id, is_new FROM hits ORDER BY id").all(),
-        backfilled.prepare("SELECT id, is_new FROM hits ORDER BY id").all(),
-    );
-    for (const table of TABLES) {
-        assert.deepEqual(dump(live, table), dump(backfilled, table), table);
+const dump = (sql, table) => sql.prepare(`SELECT * FROM ${table} ORDER BY 1, 2, 3, 4`).all();
+
+test("counting per hit matches the migration's backfill from raw hits", () => {
+    const hits = traffic();
+    const sql = live(hits);
+    reads(sql, hits);
+    const rows = sql.prepare("SELECT * FROM hits ORDER BY id").all();
+    const backfilled = migrated(rows);
+
+    assert.ok(rows.filter((h) => h.read).length > 1000);
+    for (const table of ["hits", "views", "visitors"]) {
+        assert.deepEqual(dump(sql, table), dump(backfilled, table), table);
     }
 });
 
-test("counters answer periods ending today like a scan of the host's hits", () => {
-    const hits = traffic();
-    const sql = new DatabaseSync(":memory:");
-    sql.exec(init);
-    sql.exec(counters);
-    insertVisitors(sql);
-    collect(sql, hits);
+test("the backfill keeps arrivals' referrers and clicks' previous pages, and splits visitors by host", () => {
+    // An old trip: an arrival from news.example, a click within the site,
+    // then a click across to another host.
+    const old = new DatabaseSync(":memory:");
+    old.exec(init);
+    old.exec(`
+        INSERT INTO strings (id, value) VALUES (1, 'a.test'), (2, 'b.test'), (3, 'a.test/one'), (4, 'a.test/two'),
+            (5, 'b.test/three'), (6, 'news.example');
+        INSERT INTO visitors (id, first_seen) VALUES (7, 0);
+        INSERT INTO hits (id, ts, site, host, page, visitor_id, entry_hit_id, src, engaged_s) VALUES
+            (1, 86400, 1, 1, 3, 7, 1, 6, 45),
+            (2, 86401, 1, 1, 4, 7, 1, 3, NULL),
+            (3, 86402, 1, 2, 5, 7, 1, 4, 10);`);
+    old.exec(views);
+    assert.deepEqual(
+        old.prepare("SELECT id, host, page, source, read FROM hits ORDER BY id").all().map((r) => ({ ...r })),
+        [
+            { id: 1, host: "a.test", page: "/one", source: "news.example", read: 1 },
+            { id: 2, host: "a.test", page: "/two", source: "/one", read: 0 },
+            { id: 3, host: "b.test", page: "/three", source: "", read: 0 },
+        ],
+    );
+    assert.equal(old.prepare("SELECT COUNT(*) AS n FROM visitors").get().n, 2, "one visitor per host");
+    assert.equal(old.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'strings'").get().n, 0);
+});
 
+test("sums over views and counts of visitors match scans of hits", () => {
+    const hits = traffic();
+    const sql = live(hits);
+    reads(sql, hits);
     const today = Math.floor(hits.at(-1).ts / 86400);
+    const all = (query, params) => sql.prepare(query).all(params).map((r) => ({ ...r }));
+    // Each hit, and whether it's the visitor's first on the host.
+    const RAW = `(SELECT h.*, h.ts / 86400 AS day,
+                         NOT EXISTS (SELECT 1 FROM hits p WHERE p.visitor_id = h.visitor_id
+                                     AND p.host = h.host AND p.id < h.id) AS first
+                  FROM hits h)`;
+
     for (const days of [1, 7, 30, 60]) {
         const first = today - days + 1;
-        for (const host of [2, 3, 5]) {
-            const where = { 1: first, 2: host };
-            const counted = sql
-                .prepare(
-                    `SELECT COUNT(*) AS visitors, IFNULL(SUM(first_seen >= ?1), 0) AS new,
-                            IFNULL(SUM(first_seen >= ?1 AND hits = 1), 0) AS bounced
-                     FROM visitor_hosts WHERE host = ?2 AND last_seen >= ?1`,
-                )
-                .get(where);
-            // The old queries: distinct visitors, and the first-ever-hit and
-            // no-later-hit checks against all of history.
-            const scanned = sql
-                .prepare(
-                    `SELECT COUNT(DISTINCT h.visitor_id) AS visitors,
-                            IFNULL(SUM(NOT EXISTS (SELECT 1 FROM hits p WHERE p.visitor_id = h.visitor_id
-                                                   AND p.host = h.host AND p.id < h.id)), 0) AS new,
-                            IFNULL(SUM(NOT EXISTS (SELECT 1 FROM hits p WHERE p.visitor_id = h.visitor_id
-                                                   AND p.host = h.host AND p.id < h.id)
-                                   AND NOT EXISTS (SELECT 1 FROM hits p WHERE p.visitor_id = h.visitor_id
-                                                   AND p.host = h.host AND p.id > h.id)), 0) AS bounced
-                     FROM hits h WHERE h.ts >= ?1 * 86400 AND h.host = ?2`,
-                )
-                .get(where);
-            assert.deepEqual({ ...counted }, { ...scanned }, `host ${host}, ${days} days`);
+        for (const host of HOSTS) {
+            const label = `${host}, ${days} days`;
+            const where = { 1: host, 2: first };
 
-            // Daily visitors (once per visitor per day), and page views and
-            // arrivals from referrers in total.
-            const one = (query) => ({ ...sql.prepare(query).get(where) });
+            // Unique visitors, new visitors, bounces and devices in the period.
             assert.deepEqual(
-                sql.prepare("SELECT day, visitors FROM host_daily WHERE host = ?2 AND day >= ?1 ORDER BY day").all(where),
-                sql.prepare(
-                    `SELECT ts / 86400 AS day, COUNT(DISTINCT visitor_id) AS visitors FROM hits
-                     WHERE host = ?2 AND ts / 86400 >= ?1 GROUP BY day ORDER BY day`,
-                ).all(where),
+                all(`SELECT COUNT(*) AS visitors, IFNULL(SUM(first_day >= ?2), 0) AS new,
+                            IFNULL(SUM(first_day >= ?2 AND NOT returned), 0) AS bounced,
+                            IFNULL(SUM(device = 'mobile'), 0) AS mobile
+                     FROM visitors WHERE host = ?1 AND last_day >= ?2`, where),
+                all(`SELECT COUNT(DISTINCT visitor_id) AS visitors, IFNULL(SUM(first), 0) AS new,
+                            IFNULL(SUM(first AND NOT EXISTS (SELECT 1 FROM hits p WHERE p.visitor_id = r.visitor_id
+                                       AND p.host = r.host AND p.id > r.id)), 0) AS bounced,
+                            (SELECT COUNT(DISTINCT visitor_id) FROM hits WHERE host = ?1 AND ts / 86400 >= ?2
+                             AND visitor_id % 3 = 1) AS mobile
+                     FROM ${RAW} r WHERE host = ?1 AND day >= ?2`, where),
+                label,
             );
+            // The chart: views, unique visitors, new visitors and reads per day.
             assert.deepEqual(
-                one("SELECT IFNULL(SUM(views), 0) AS n FROM page_daily WHERE host = ?2 AND day >= ?1"),
-                one("SELECT COUNT(*) AS n FROM hits WHERE host = ?2 AND ts / 86400 >= ?1"),
+                all(`SELECT day, SUM(views) AS views, SUM(visitors) AS visitors, SUM(new) AS new, SUM(reads) AS reads
+                     FROM views WHERE host = ?1 AND day >= ?2 GROUP BY day`, where),
+                all(`SELECT day, COUNT(*) AS views, COUNT(DISTINCT visitor_id) AS visitors, SUM(first) AS new,
+                            SUM(read) AS reads
+                     FROM ${RAW} WHERE host = ?1 AND day >= ?2 GROUP BY day`, where),
+                label,
             );
-            assert.deepEqual(
-                one("SELECT IFNULL(SUM(visits), 0) AS n FROM ref_daily WHERE host = ?2 AND day >= ?1"),
-                one(`SELECT COUNT(*) AS n FROM hits WHERE host = ?2 AND ts / 86400 >= ?1
-                     AND entry_hit_id = id AND src IS NOT NULL`),
-            );
+            // Pages, filtered by a source: where readers went from a site or a page.
+            for (const source of ["", ...SITES, ...PAGES]) {
+                assert.deepEqual(
+                    all(`SELECT page, SUM(views) AS views, SUM(new) AS new FROM views
+                         WHERE host = ?1 AND day >= ?2 AND source = ?3 GROUP BY page`, { ...where, 3: source }),
+                    all(`SELECT page, COUNT(*) AS views, SUM(first) AS new FROM ${RAW}
+                         WHERE host = ?1 AND day >= ?2 AND source = ?3 GROUP BY page`, { ...where, 3: source }),
+                    `${label}, from ${source}`,
+                );
+            }
+            // Sources, filtered by a page: where its readers came from.
+            for (const page of PAGES) {
+                assert.deepEqual(
+                    all(`SELECT source, SUM(views) AS views FROM views
+                         WHERE host = ?1 AND day >= ?2 AND page = ?3 AND source != '' GROUP BY source`, { ...where, 3: page }),
+                    all(`SELECT source, COUNT(*) AS views FROM ${RAW}
+                         WHERE host = ?1 AND day >= ?2 AND page = ?3 AND source != '' GROUP BY source`, { ...where, 3: page }),
+                    `${label}, to ${page}`,
+                );
+            }
         }
     }
 });
 
-test("an end beacon that changes nothing writes nothing", () => {
+test("a hit is read once, and only by its own visitor", () => {
+    const hits = traffic(1);
+    const sql = live(hits);
+    const visitor = hits[0].visitor;
+    const row = () => ({ ...sql.prepare("SELECT reads FROM views").get() });
+
+    assert.deepEqual(read(sql, 1, visitor + 1), [0, 0], "someone else's hit");
+    assert.deepEqual(read(sql, 1, visitor), [1, 1]);
+    assert.deepEqual(read(sql, 1, visitor), [0, 0], "a repeat writes nothing");
+    assert.deepEqual(row(), { reads: 1 });
+});
+
+test("a visitor's row is only written on their first hit of a day or their second ever", () => {
     const sql = new DatabaseSync(":memory:");
     sql.exec(init);
-    sql.exec(counters);
-    insertVisitors(sql);
-    collect(sql, traffic(1));
-    const counted = sql.prepare(COUNT_END);
-    const changes = (e, s, visitor = traffic(1)[0].visitor) => counted.run({ 1: e, 2: s, 3: 1, 4: visitor }).changes;
-    const row = () => sql.prepare("SELECT engaged_sum, scroll_sum, samples FROM host_daily").get();
+    sql.exec(views);
+    const insert = sql.prepare("INSERT INTO hits (ts, host, page, visitor_id) VALUES (?, 'a.test', '/', 1)");
+    const visitor = sql.prepare(COUNT_VISITOR);
+    const hit = (ts) => {
+        insert.run(ts);
+        return visitor.run({ 1: null, 2: null, 3: null, 4: "desktop" }).changes;
+    };
+    const day = 20000 * 86400;
+    assert.equal(hit(day), 1, "first ever");
+    assert.equal(hit(day + 60), 1, "second ever");
+    assert.equal(hit(day + 120), 0, "again the same day");
+    assert.equal(hit(day + 86400), 1, "first of the next day");
+    assert.equal(hit(day + 86460), 0, "again that day");
+    assert.deepEqual({ ...sql.prepare("SELECT first_day, last_day, returned FROM visitors").get() }, {
+        first_day: 20000,
+        last_day: 20001,
+        returned: 1,
+    });
+});
 
-    assert.equal(changes(10, 50), 1);
-    sql.prepare(endSql).run({ 1: 10, 2: 50, 3: 1, 4: traffic(1)[0].visitor });
-    assert.deepEqual({ ...row() }, { engaged_sum: 10, scroll_sum: 50, samples: 1 });
-    assert.equal(changes(10, 50), 0, "a repeat beacon");
-    assert.equal(changes(5, 20), 0, "an older beacon");
-    assert.equal(changes(99, 100, 999), 0, "someone else's hit");
+test("visitors under a filter match a scan of the hits, through the covering indexes", () => {
+    const hits = traffic();
+    const sql = live(hits);
+    const today = Math.floor(hits.at(-1).ts / 86400);
+    const all = (query, params) => sql.prepare(query).all(...params).map((r) => ({ ...r }));
+    // node:sqlite binds ?N placeholders by name rather than position, and only
+    // the ones a query uses (D1 binds by position).
+    const numbered = (query, params) => [
+        Object.fromEntries(params.map((v, i) => [i + 1, v]).filter(([n]) => query.includes(`?${n}`))),
+    ];
+    const sorted = (rows) => rows.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+
+    for (const days of [1, 30, 60]) {
+        const first = today - days + 1;
+        for (const host of HOSTS) {
+            for (const [page, source] of [["/one", null], [null, "news.example"], [null, "/two/"], ["/", ""]]) {
+                const f = filteredVisitors(host, first, page, source);
+                const label = `${host}, ${days} days, page ${page}, source ${source}`;
+                // Without the indexes, and with "never came back" from the hits.
+                const match = `NOT INDEXED WHERE host = ? AND ts >= ? * 86400 ${page === null ? "" : "AND page = ?"}
+                               ${source === null ? "" : "AND source = ?"}`;
+                const params = [host, first, ...(page === null ? [] : [page]), ...(source === null ? [] : [source])];
+                assert.deepEqual(
+                    all(f.daily, numbered(f.daily, f.params)),
+                    all(`SELECT ts / 86400 AS day, COUNT(DISTINCT visitor_id) AS visitors FROM hits ${match} GROUP BY day`, params),
+                    label,
+                );
+                assert.deepEqual(
+                    sorted(all(f.people, numbered(f.people, f.params))),
+                    sorted(all(
+                        `SELECT v.device, COUNT(*) AS visitors,
+                                SUM((SELECT MIN(ts) / 86400 FROM hits p WHERE p.host = v.host AND p.visitor_id = v.id) >= ?
+                                    AND (SELECT COUNT(*) FROM hits p WHERE p.host = v.host AND p.visitor_id = v.id) = 1) AS bounced
+                         FROM (SELECT DISTINCT visitor_id FROM hits ${match}) f
+                         JOIN visitors v ON v.host = ? AND v.id = f.visitor_id GROUP BY v.device`,
+                        [first, ...params, host],
+                    )),
+                    label,
+                );
+            }
+        }
+    }
+
+    const plan = (page, source) => {
+        const f = filteredVisitors("a.test", today, page, source);
+        return sql.prepare(`EXPLAIN QUERY PLAN ${f.daily}`).all(...numbered(f.daily, f.params)).map((r) => r.detail).join("; ");
+    };
+    assert.match(plan("/one", null), /COVERING INDEX hits_page/);
+    assert.match(plan(null, "news.example"), /COVERING INDEX hits_source/);
 });

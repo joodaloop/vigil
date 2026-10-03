@@ -3,15 +3,16 @@
 // where /_v/* is proxied to the Vigil Worker (see README).
 //
 // A page view is recorded on the first scroll that follows real user input,
-// so scroll restoration and #anchor jumps don't count. When the page is hidden,
-// a beacon reports visible time and max scroll depth for that view.
+// so scroll restoration and #anchor jumps don't count. Once the page has been
+// visible for 30 seconds (or data-read-after="N" on the script tag), the view
+// also counts as a read.
 (function () {
     var script = document.currentScript;
     if (!script) return;
     var base = script.src.replace(/\/[^/]*$/, ""); // ".../_v"
-    var doc = document.documentElement;
+    var readAfterMs = (Number(script.dataset && script.dataset.readAfter) || 30) * 1000;
 
-    var view;
+    var view, timer;
 
     function now() {
         return Date.now();
@@ -21,20 +22,48 @@
         view = {
             ref: referrer,
             hitId: null,
-            sent: false,
+            sent: false, // the hit
             input: false,
             visibleMs: 0,
             visibleSince: document.visibilityState === "visible" ? now() : 0,
-            maxScroll: 0,
-            pendingEnd: null,
-            lastEnd: null,
+            read: false, // visible for long enough
+            readSent: false,
         };
     }
 
-    // How much of the page has been on screen, 0-100.
-    function seen() {
-        var h = doc.scrollHeight;
-        return h > 0 ? Math.min(100, Math.round(((window.scrollY + window.innerHeight) / h) * 100)) : 100;
+    function visibleMs(v) {
+        return v.visibleMs + (v.visibleSince ? now() - v.visibleSince : 0);
+    }
+
+    // Report the read once the view has its hit id, whichever comes last.
+    function sendRead(v) {
+        if (v.read && v.hitId && !v.readSent) {
+            v.readSent = navigator.sendBeacon(base + "/read", JSON.stringify({ id: v.hitId }));
+        }
+    }
+
+    function check(v) {
+        if (!v.read && visibleMs(v) >= readAfterMs) v.read = true;
+        sendRead(v);
+    }
+
+    // Time the current view's read for when it will have been visible long
+    // enough, if it's visible now.
+    function arm() {
+        clearTimeout(timer);
+        var v = view;
+        if (v.read || !v.visibleSince) return;
+        timer = setTimeout(function () {
+            check(v);
+        }, readAfterMs - visibleMs(v));
+    }
+
+    // Stop the current view's clock, e.g. when it's hidden or left.
+    function pause() {
+        if (view.visibleSince) view.visibleMs += now() - view.visibleSince;
+        view.visibleSince = 0;
+        clearTimeout(timer);
+        check(view);
     }
 
     function onInput() {
@@ -45,10 +74,7 @@
         // The request belongs to this view even if an SPA navigation happens
         // before its response arrives.
         var current = view;
-        if (!current.input) return;
-        var p = seen();
-        if (p > current.maxScroll) current.maxScroll = p;
-        if (current.sent) return;
+        if (!current.input || current.sent) return;
         current.sent = true;
 
         var q = new URLSearchParams(location.search);
@@ -58,8 +84,6 @@
             r: current.ref || undefined,
             tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
             us: q.get("utm_source") || undefined,
-            um: q.get("utm_medium") || undefined,
-            uc: q.get("utm_campaign") || undefined,
         };
         fetch(base + "/hit", { method: "POST", body: JSON.stringify(body), keepalive: true })
             .then(function (r) {
@@ -68,44 +92,18 @@
             .then(function (j) {
                 if (j) {
                     current.hitId = j.id;
-                    sendEnd(current);
+                    sendRead(current);
                 }
             })
             .catch(function () {});
     }
 
-    function sendEnd(current) {
-        var end = current.pendingEnd;
-        if (!current.hitId || !end) return;
-        if (current.lastEnd && current.lastEnd.e === end.e && current.lastEnd.s === end.s) {
-            current.pendingEnd = null;
-            return;
-        }
-        if (navigator.sendBeacon(
-            base + "/end",
-            JSON.stringify({ id: current.hitId, e: end.e, s: end.s }),
-        )) {
-            // Only suppress duplicates after the browser accepts the beacon.
-            current.lastEnd = end;
-            current.pendingEnd = null;
-        }
-    }
-
-    function flush(current) {
-        if (!current.sent) return;
-        var ms = current.visibleMs + (current.visibleSince ? now() - current.visibleSince : 0);
-        // Keep a snapshot if /hit is still pending, including for an old view.
-        current.pendingEnd = { e: Math.round(ms / 1000), s: current.maxScroll };
-        sendEnd(current);
-    }
-
     function onVisibility() {
         if (document.visibilityState === "hidden") {
-            if (view.visibleSince) view.visibleMs += now() - view.visibleSince;
-            view.visibleSince = 0;
-            flush(view);
+            pause();
         } else {
             if (!view.visibleSince) view.visibleSince = now();
+            arm();
         }
     }
 
@@ -120,10 +118,9 @@
             lastHref = location.href;
             return;
         }
-        if (view.visibleSince) view.visibleMs += now() - view.visibleSince;
-        view.visibleSince = 0;
-        flush(view);
+        pause();
         reset(lastHref);
+        arm();
         lastHref = location.href;
         lastPath = location.pathname;
     }
@@ -143,7 +140,7 @@
     });
     window.addEventListener("scroll", onScroll, opts);
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("pagehide", function () { flush(view); });
 
     reset(document.referrer);
+    arm();
 })();

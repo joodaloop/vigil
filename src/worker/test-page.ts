@@ -7,7 +7,7 @@ export function testPage(url: URL): Response {
     const name = url.pathname.split("/")[3] || "a";
     const links = PAGES.map((p) => `<a href="/_v/test/${p}">page ${p}</a>`).join(" · ");
     const para =
-        "<p>Scroll to record a page view. Close or hide the tab to send time on page and scroll depth.</p>";
+        "<p>Scroll to record a page view. Keep the tab visible for 30 seconds to count it as read.</p>";
 
     const html = `<!doctype html>
 <html>

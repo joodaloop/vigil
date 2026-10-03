@@ -2,8 +2,7 @@
 
 export type HostTotals = {
     views: number;
-    avgScrollPct: number | null; // average max scroll depth, 0-100
-    avgEngagedS: number | null; // average seconds visible per page view
+    reads: number; // views that stayed visible long enough to count as read
     visitors: number;
     devices: { desktop: number; tablet: number; mobile: number }; // visitors per device type
     new: number; // visitors whose first ever hit on this host is in the period
@@ -29,7 +28,7 @@ export type PageRow = {
 export type HostStats = {
     totals: HostTotals;
     daily: HostDaily;
-    referrers: Referrer[]; // arrivals by visits; page filter only
+    referrers: Referrer[]; // where views came from, by views; page filter only
     pages: PageRow[]; // by views; referrer filter only
 };
 
@@ -40,8 +39,8 @@ export type HostSummary = {
 };
 
 export type Referrer = {
-    domain: string;
-    visits: number; // arrivals from this referrer
+    domain: string; // a referring site, or "/path" of a page on this one
+    visits: number; // views that came from this source
     daily: number[];
 };
 
@@ -58,7 +57,5 @@ export type HostSummaries = {
     days: number[];
     hosts: Record<string, HostSummary>;
 };
-export type SiteConfig = {
-    site: string;
-    hosts: { host: string; name: string }[];
-};
+// One configured site: a hostname, with the name the dashboard shows.
+export type Site = { host: string; name: string };
