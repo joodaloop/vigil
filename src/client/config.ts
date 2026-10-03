@@ -4,11 +4,11 @@ export const SITES = [
   {
     site: "joodaloop.com",
     hosts: [
-      { host: "map.joodaloop.com", name: "Map of my Internet" },
       { host: "joodaloop.com", name: "JOODALOOP" },
       { host: "webcraft.joodaloop.com", name: "Webcraft" },
-      { host: "mac.joodaloop.com", name: "Mac apps" },
+      { host: "map.joodaloop.com", name: "Map of my Internet" },
       { host: "buy.joodaloop.com", name: "Things You Could Buy" },
+      { host: "mac.joodaloop.com", name: "Mac apps" },
     ],
   },
   {
