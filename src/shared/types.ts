@@ -16,33 +16,25 @@ export type HostDaily = {
     new: number[];
 };
 
-// Where a page's views came from.
-export type Source = {
-    kind: "within" | "host" | "direct" | "referrer";
-    label: string; // "Within site", another host, "Direct", or a referrer domain
-    views: number;
-    new: number;
-    // Previous pages, for "within" (this host) and "host" (another subdomain).
-    children: { path: string; views: number; new: number }[];
-};
+// Views, distinct visitors and new visitors.
+export type Counts = { views: number; visitors: number; new: number };
 
-export type PageRow = {
+export type PageRow = Counts & {
     path: string;
-    views: number;
-    new: number;
-    sources: Source[];
+    daily: number[]; // views per day
 };
 
 export type HostStats = {
     totals: HostTotals;
     daily: HostDaily;
-    pages: PageRow[];
+    referrers: Referrer[]; // arrivals by visits; page filter only
+    pages: PageRow[]; // by views; referrer filter only
 };
 
-// The whole site, all hosts together.
-export type SiteStats = {
-    totals: { views: number; visitors: number; new: number }; // new = first hit on the site, ever
-    daily: { views: number[]; visitors: number[]; new: number[] };
+// The headline numbers for one host, for the sidebar.
+export type HostSummary = {
+    totals: Counts;
+    daily: HostDaily;
 };
 
 export type Referrer = {
@@ -51,10 +43,16 @@ export type Referrer = {
     daily: number[];
 };
 
+// GET /api/overview: everything for one host.
 export type Overview = {
     days: number[]; // unix seconds at the start of each UTC day
     ref: string | null; // active referrer filter
-    site: SiteStats;
-    referrers: Referrer[]; // all referrers by visits, ignoring the filter
-    hosts: Record<string, HostStats>;
+    page: string | null; // active page filter (a path)
+    stats: HostStats;
+};
+
+// GET /api/hosts: every host on a site, by host name.
+export type HostSummaries = {
+    days: number[];
+    hosts: Record<string, HostSummary>;
 };

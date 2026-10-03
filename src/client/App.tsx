@@ -1,34 +1,70 @@
-import { createResource, createSignal, For, Show, type JSX } from "solid-js";
-import type { HostStats, Overview } from "../shared/types";
-import { Chart, lowestPointOffset, type Line } from "./Chart";
+import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js";
+import type { HostStats, HostSummaries, HostSummary, Overview, PageRow, Referrer } from "../shared/types";
+import { Chart, type Line } from "./Chart";
 import { DEFAULT_PERIOD, PERIODS, SITES } from "./config";
 import { referrerName } from "./referrers";
 import { theme } from "./theme";
 
-type Query = { site: string; days: number; ref: string | null };
+// Every host on the dashboard, in display order, with the site it belongs to.
+const HOSTS = SITES.flatMap((s) => s.hosts.map((h) => ({ ...h, site: s.site })));
+
+type ChartKind = "line" | "bars";
+type Query = {
+  host: string;
+  days: number;
+  ref: string | null; // referrer filter
+  page: string | null; // page filter, a path
+  chart: ChartKind;
+};
 
 function initialQuery(): Query {
   const params = new URLSearchParams(location.search);
   const n = Number(params.get("days"));
-  const site = params.get("site");
+  const host = params.get("host");
   return {
-    site: SITES.some((s) => s.site === site) ? site! : SITES[0].site,
+    host: HOSTS.some((h) => h.host === host) ? host! : HOSTS[0].host,
     days: PERIODS.includes(n) ? n : DEFAULT_PERIOD,
     ref: params.get("ref") || null,
+    page: params.get("page") || null,
+    chart: params.get("chart") === "bars" ? "bars" : "line",
   };
 }
 
 function toParams(q: Query) {
-  const params = new URLSearchParams({ site: q.site, days: String(q.days) });
+  const params = new URLSearchParams({ host: q.host, days: String(q.days) });
   if (q.ref) params.set("ref", q.ref);
+  if (q.page) params.set("page", q.page);
+  if (q.chart !== "line") params.set("chart", q.chart);
   return params;
 }
 
-async function fetchOverview(q: Query): Promise<Overview> {
-  const params = toParams(q);
-  const r = await fetch(`/api/overview?${params}`);
+async function get<T>(path: string, params: Record<string, string | null>): Promise<T> {
+  const search = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v) search.set(k, v);
+  const r = await fetch(`${path}?${search}`);
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
   return r.json();
+}
+
+// The open host in full.
+function fetchOverview(q: Query) {
+  const site = HOSTS.find((h) => h.host === q.host)!.site;
+  return get<Overview>("/api/overview", {
+    site,
+    host: q.host,
+    days: String(q.days),
+    ref: q.ref,
+    page: q.page,
+  });
+}
+
+// Headline numbers for every host, for the sidebar. Never filtered.
+async function fetchSummaries(days: number) {
+  const all = await Promise.all(
+    SITES.map((s) => get<HostSummaries>("/api/hosts", { site: s.site, days: String(days) })),
+  );
+  const hosts: Record<string, HostSummary> = Object.assign({}, ...all.map((a) => a.hosts));
+  return { days: all[0]?.days ?? [], hosts };
 }
 
 // 950 -> "950", 4321 -> "4.3k", 17694 -> "17.7k", 1250000 -> "1.3M"
@@ -41,6 +77,16 @@ function duration(s: number | null) {
   return `${Math.round(s)}s`;
 }
 
+// `color` blended into `bg` ("#rrggbb" both), `amount` of the way: a lighter,
+// opaque shade.
+function tint(color: string, bg: string, amount: number) {
+  const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const [a, b] = [rgb(color), rgb(bg)];
+  return `rgb(${a.map((v, i) => Math.round(b[i] + (v - b[i]) * amount)).join(",")})`;
+}
+
+// Views, visitors and new visitors. Each is a subset of the one before, so
+// as bars the later ones sit in front.
 function chartLines(
   h: { daily: { views: number[]; visitors: number[]; new: number[] } } | undefined,
 ): Line[] {
@@ -52,21 +98,12 @@ function chartLines(
   ];
 }
 
-const SUMMARY_CHART = { height: 260, lineWidth: 2.5 };
-const LEGEND_NUDGE = 2; // px
-
 export function App() {
   const [query, setQuery] = createSignal(initialQuery());
   const [data] = createResource(query, fetchOverview);
-  const hosts = () => SITES.find((s) => s.site === query().site)!.hosts;
-
-  // One scale for every referrer sparkline (across all pages of the list),
-  // so their heights compare.
-  const referrerMax = () => {
-    let max = 0;
-    for (const r of data.latest?.referrers ?? []) for (const v of r.daily) if (v > max) max = v;
-    return { count: max };
-  };
+  // Only refetched when the period changes.
+  const days = createMemo(() => query().days);
+  const [summaries] = createResource(days, fetchSummaries);
 
   function update(change: Partial<Query>) {
     const next = { ...query(), ...change };
@@ -74,255 +111,291 @@ export function App() {
     history.replaceState(null, "", `?${toParams(next)}`);
   }
 
-  // One max across all host charts, so they're drawn at the same scale.
-  const maxes = () => {
-    let max = 0;
-    for (const { host } of hosts()) {
-      for (const line of chartLines(data.latest?.hosts[host])) {
-        for (const v of line.values) if (v !== null && v > max) max = v;
-      }
-    }
-    return { count: max };
-  };
-
-  const site = () => data.latest?.site;
-
-  // Lift the legend so its last row is level with the chart's lowest point.
-  // 0.725em is half a line (line-height 1.45), so the row's middle lines up;
-  // LEGEND_NUDGE raises it a little further, which reads better by eye.
-  const legendPadding = () => {
-    const offset = lowestPointOffset(
-      chartLines(site()),
-      SUMMARY_CHART.height,
-      SUMMARY_CHART.lineWidth,
-    );
-    return offset === null ? undefined : `max(0px, calc(${offset + LEGEND_NUDGE}px - 0.725em))`;
-  };
-
   return (
     <main>
-      <div class="top">
-        <Show when={data.error}>
-          <p class="muted">Couldn't load stats: {String(data.error?.message ?? data.error)}</p>
+      <nav class="sidebar">
+        <div class="sidebar-top">
+          <h1>Vigil</h1>
+          {/* Shown like a total; the real select sits invisibly on top at
+              normal size, so its native menu isn't oversized. */}
+          <div class="days-picker">
+            <div class="days-num" aria-hidden="true">
+              {query().days}
+            </div>
+            <div class="days-label" aria-hidden="true">
+              days
+            </div>
+            <select
+              id="period"
+              aria-label="Time period"
+              value={query().days}
+              onChange={(e) => update({ days: Number(e.currentTarget.value) })}
+            >
+              <For each={PERIODS}>{(n) => <option value={n}>{n} days</option>}</For>
+            </select>
+          </div>
+          {/* How the big chart is drawn. */}
+          <div class="chart-kind" role="group" aria-label="Chart style">
+            <For each={["line", "bars"] as const}>
+              {(kind) => (
+                <button
+                  aria-pressed={query().chart === kind}
+                  onClick={() => update({ chart: kind })}
+                >
+                  {kind}
+                </button>
+              )}
+            </For>
+          </div>
+        </div>
+
+        {/* One entry per host; the open one is shown in full on the right. */}
+        <For each={HOSTS}>
+          {(h) => {
+            const s = () => summaries.latest?.hosts[h.host];
+            const open = () => query().host === h.host;
+            // Loaded, and nothing in the period.
+            const empty = () => !!summaries.latest && !s()?.totals.views;
+            return (
+              <button
+                class="host-item"
+                aria-pressed={open()}
+                title={h.host}
+                disabled={empty()}
+                onClick={() => open() || update({ host: h.host, ref: null, page: null })}
+              >
+                <span class="host-name">{h.name}</span>
+                <Show when={!empty()} fallback={<span class="muted">No stats yet</span>}>
+                  <span class="host-nums">
+                    <span style={{ color: theme.stats.views }}>{num(s()?.totals.views ?? 0)}</span>
+                    <span style={{ color: theme.stats.visitors }}>
+                      {num(s()?.totals.visitors ?? 0)}
+                    </span>
+                    <span style={{ color: theme.stats.new }}>{num(s()?.totals.new ?? 0)}</span>
+                    <Chart
+                      days={summaries.latest?.days ?? []}
+                      lines={chartLines(s())}
+                      height={20}
+                      lineWidth={1.5}
+                    />
+                  </span>
+                </Show>
+              </button>
+            );
+          }}
+        </For>
+      </nav>
+
+      <section class="panel">
+        <Show when={data.error ?? summaries.error}>
+          {(e) => (
+            <p class="muted error">Couldn't load stats: {String((e() as Error).message ?? e())}</p>
+          )}
         </Show>
 
-        <section class="summary">
-          <div class="summary-side">
-            <div class="controls">
-              <Show when={SITES.length > 1}>
-                <div class="period">
-                  <span class="period-picker site-picker">
-                    <span aria-hidden="true">{query().site}</span>
-                    <select
-                      id="site"
-                      aria-label="Site"
-                      value={query().site}
-                      onChange={(e) => update({ site: e.currentTarget.value, ref: null })}
-                    >
-                      <For each={SITES}>{(s) => <option value={s.site}>{s.site}</option>}</For>
-                    </select>
-                  </span>
-                </div>
-              </Show>
-              <div class="period">
-                <label for="period">
-                  <CalendarIcon />
-                </label>
-                {/* The visible text is a span; the real select sits invisibly on
-                                    top at normal size, so its native menu isn't oversized. */}
-                <span class="period-picker">
-                  <span aria-hidden="true">{query().days} days</span>
-                  <select
-                    id="period"
-                    value={query().days}
-                    onChange={(e) => update({ days: Number(e.currentTarget.value) })}
-                  >
-                    <For each={PERIODS}>{(n) => <option value={n}>{n} days</option>}</For>
-                  </select>
-                </span>
-              </div>
-            </div>
-
-            <div class="legend" style={{ "padding-bottom": legendPadding() }}>
-              <div style={{ color: theme.stats.views }}>
-                <span>Views</span> <b>{num(site()?.totals.views ?? 0)}</b>
-              </div>
-              <div style={{ color: theme.stats.visitors }}>
-                <span>Visitors</span> <b>{num(site()?.totals.visitors ?? 0)}</b>
-              </div>
-              <div style={{ color: theme.stats.new }}>
-                <span>New visitors</span> <b>{num(site()?.totals.new ?? 0)}</b>
-              </div>
-            </div>
-          </div>
-
-          <Chart
-            days={data.latest?.days ?? []}
-            lines={chartLines(site())}
-            height={SUMMARY_CHART.height}
-            lineWidth={SUMMARY_CHART.lineWidth}
-          />
-
-          <div class="referrers">
-            <Paged items={data.latest?.referrers ?? []}>
-              {(r) => {
-                const on = () => query().ref === r.domain;
-                return (
-                  <div class="referrer" classList={{ active: on() }}>
-                    <button
-                      class="ref-name"
-                      title={on() ? "Clear filter" : `Only visits from ${r.domain}`}
-                      aria-pressed={on()}
-                      onClick={() => update({ ref: on() ? null : r.domain })}
-                    >
-                      {referrerName(r.domain)}
-                    </button>
-                    {/* Count, swapped for a sparkline while the list is hovered (CSS). */}
-                    <span class="ref-count" style={{ color: theme.stats.views }}>
-                      <span class="ref-num">{num(r.visits)}</span>
-                      <span class="ref-spark" aria-hidden="true">
-                        <Chart
-                          days={data.latest?.days ?? []}
-                          lines={[{ values: r.daily, color: theme.stats.views, scale: "count" }]}
-                          maxes={referrerMax()}
-                          height={16}
-                          lineWidth={1.25}
-                        />
-                      </span>
-                    </span>
-                  </div>
-                );
-              }}
-            </Paged>
-          </div>
-        </section>
-      </div>
-
-      <div class="hosts">
-        <For each={hosts()}>
-          {(h) => (
-            <HostPanel
-              name={h.name}
-              host={h.host}
-              stats={data.latest?.hosts[h.host]}
-              days={data.latest?.days ?? []}
-              maxes={maxes()}
-            />
-          )}
-        </For>
-      </div>
+        <Stats
+          bars={query().chart === "bars"}
+          name={HOSTS.find((h) => h.host === query().host)!.name}
+          host={query().host}
+          stats={data.latest?.stats}
+          days={data.latest?.days ?? []}
+          activeRef={query().ref}
+          onSelectRef={(ref) => update({ ref })}
+          activePage={query().page}
+          onSelectPage={(page) => update({ page })}
+        />
+      </section>
     </main>
   );
 }
 
-function HostPanel(props: {
+// Totals and chart above, then pages and referrers side by side.
+function Stats(props: {
+  bars: boolean;
   name: string;
   host: string;
   stats: HostStats | undefined;
   days: number[];
-  maxes: Record<string, number>;
+  activeRef: string | null;
+  onSelectRef: (ref: string | null) => void;
+  activePage: string | null;
+  onSelectPage: (page: string | null) => void;
 }) {
   const t = () => props.stats?.totals;
   const devices = () => t()?.devices ?? { desktop: 0, tablet: 0, mobile: 0 };
+  // One scale for every page's sparkline (across all pages of the list), so
+  // their heights compare.
+  const pageMax = () => {
+    let max = 0;
+    for (const p of props.stats?.pages ?? []) for (const v of p.daily) if (v > max) max = v;
+    return { count: max };
+  };
+  // The day hovered on the chart, whose numbers replace the period's.
+  const [day, setDay] = createSignal<number | null>(null);
+  const shown = (stat: "views" | "visitors" | "new") => {
+    const i = day();
+    return (i === null ? t()?.[stat] : props.stats?.daily[stat][i]) ?? 0;
+  };
 
   return (
-    <section class="host">
-      <div class="host-title">
-        <h2>{props.name}</h2>
-        <span class="host-url" title={props.host}>
-          {props.host}
-        </span>
-      </div>
-
-      <div class="totals">
-        <div>
-          <div style={{ color: theme.stats.views }}>
-            <div class="big">{num(t()?.views ?? 0)}</div>
-            <div class="big-label">Views</div>
-          </div>
-          <div class="sub stacked">
-            <span title="Average scroll depth">
-              {t()?.avgScrollPct == null ? "–" : `${Math.round(t()!.avgScrollPct!)}%`}
+    <div class="stats">
+      <div class="stats-main">
+        {/* Name and address on the left, totals on the right. */}
+        <div class="stats-head">
+          <div class="host-title">
+            <h2>{props.name}</h2>
+            <span class="host-url">
+              {day() === null ? props.host : fullDate.format(props.days[day()!] * 1000)}
             </span>
-            <span title="Average time on page">{duration(t()?.avgEngagedS ?? null)}</span>
+          </div>
+          {/* While a day is hovered: its numbers, and the rest (only known for
+              the whole period) hidden. */}
+          <div class="totals" classList={{ "one-day": day() !== null }}>
+            <div>
+              <div style={{ color: theme.stats.views }}>
+                <div class="big">{num(shown("views"))}</div>
+                <div class="big-label">Views</div>
+              </div>
+              <div class="sub stacked icons">
+                <span title="Average scroll depth">
+                  <PieIcon pct={t()?.avgScrollPct ?? 0} />{" "}
+                  {t()?.avgScrollPct == null ? "–" : `${Math.round(t()!.avgScrollPct!)}%`}
+                </span>
+                <span title="Average time on page">
+                  <ClockIcon /> {duration(t()?.avgEngagedS ?? null)}
+                </span>
+              </div>
+            </div>
+            <div>
+              <div style={{ color: theme.stats.visitors }}>
+                <div class="big">{num(shown("visitors"))}</div>
+                <div class="big-label">Visitors</div>
+              </div>
+              <div class="sub stacked icons devices">
+                <span title="Desktop">
+                  <DeviceIcon w={14} h={9} /> {pct(devices().desktop, t()?.visitors ?? 0)}%
+                </span>
+                <span title="Tablet">
+                  <DeviceIcon w={10} h={12} /> {pct(devices().tablet, t()?.visitors ?? 0)}%
+                </span>
+                <span title="Phone">
+                  <DeviceIcon w={7} h={12} /> {pct(devices().mobile, t()?.visitors ?? 0)}%
+                </span>
+              </div>
+            </div>
+            <div>
+              <div style={{ color: theme.stats.new }}>
+                <div class="big">{num(shown("new"))}</div>
+                <div class="big-label">New visitors</div>
+              </div>
+              <div class="sub bounced" title="New visitors who viewed one page and never came back">
+                <BounceIcon /> {num(t()?.newBounced ?? 0)}
+              </div>
+            </div>
           </div>
         </div>
-        <div>
-          <div style={{ color: theme.stats.visitors }}>
-            <div class="big">{num(t()?.visitors ?? 0)}</div>
-            <div class="big-label">Visitors</div>
-          </div>
-          <div class="sub stacked devices">
-            <span title="Desktop">
-              <DeviceIcon w={14} h={9} /> {pct(devices().desktop, t()?.visitors ?? 0)}%
-            </span>
-            <span title="Tablet">
-              <DeviceIcon w={10} h={12} /> {pct(devices().tablet, t()?.visitors ?? 0)}%
-            </span>
-            <span title="Phone">
-              <DeviceIcon w={7} h={12} /> {pct(devices().mobile, t()?.visitors ?? 0)}%
-            </span>
-          </div>
-        </div>
-        <div>
-          <div style={{ color: theme.stats.new }}>
-            <div class="big">{num(t()?.new ?? 0)}</div>
-            <div class="big-label">New visitors</div>
-          </div>
-          <div class="sub bounced" title="New visitors who viewed one page and never came back">
-            <BounceIcon /> {num(t()?.newBounced ?? 0)}
-          </div>
-        </div>
+
+        <Chart
+          days={props.days}
+          lines={chartLines(props.stats)}
+          height={160}
+          headroom={40}
+          lineWidth={2}
+          bars={props.bars}
+          dim={(c) => tint(c, theme.surface, 0.35)}
+          onHover={setDay}
+        />
       </div>
 
-      <Chart
-        days={props.days}
-        lines={chartLines(props.stats)}
-        maxes={props.maxes}
-        height={160}
-        lineWidth={2}
-      />
+      <div class="lists">
+        <div class="pages">
+          <Paged items={props.stats?.pages ?? []}>
+            {(page) => (
+              <PageItem
+                page={page}
+                days={props.days}
+                max={pageMax()}
+                active={props.activePage === page.path}
+                onSelect={props.onSelectPage}
+              />
+            )}
+          </Paged>
+        </div>
 
-      <div class="pages">
-        <Paged items={props.stats?.pages ?? []}>
-          {(page) => (
-            <Row
-              label={page.path}
-              views={page.views}
-              new={page.new}
-              level={0}
-              nested={() => (
-                <For each={page.sources}>
-                  {(source) => (
-                    <Row
-                      label={source.kind === "referrer" ? referrerName(source.label) : source.label}
-                      views={source.views}
-                      new={source.new}
-                      level={1}
-                      nested={
-                        source.children.length > 0
-                          ? () => (
-                              <For each={source.children}>
-                                {(c) => (
-                                  <Row label={c.path} views={c.views} new={c.new} level={2} />
-                                )}
-                              </For>
-                            )
-                          : undefined
-                      }
-                    />
-                  )}
-                </For>
-              )}
-            />
-          )}
-        </Paged>
+        <Referrers
+          items={props.stats?.referrers ?? []}
+          days={props.days}
+          active={props.activeRef}
+          onSelect={props.onSelectRef}
+        />
       </div>
-    </section>
+    </div>
+  );
+}
+
+// "September 19, 2026"; days are UTC.
+const fullDate = new Intl.DateTimeFormat("en", {
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+// Referrers by visits. Clicking one filters everything to visits from it
+// (or clears the filter); hovering the list swaps counts for sparklines.
+function Referrers(props: {
+  items: Referrer[];
+  days: number[];
+  active: string | null;
+  onSelect: (ref: string | null) => void;
+}) {
+  // One scale for every sparkline (across all pages of the list), so their
+  // heights compare.
+  const max = () => {
+    let max = 0;
+    for (const r of props.items) for (const v of r.daily) if (v > max) max = v;
+    return { count: max };
+  };
+
+  return (
+    <div class="referrers">
+      <Paged items={props.items}>
+        {(r) => {
+          const on = () => props.active === r.domain;
+          return (
+            <div class="referrer" classList={{ active: on() }}>
+              <button
+                class="ref-name"
+                title={on() ? "Clear filter" : `Only visits from ${r.domain}`}
+                aria-pressed={on()}
+                onClick={() => props.onSelect(on() ? null : r.domain)}
+              >
+                {referrerName(r.domain)}
+              </button>
+              {/* Count, swapped for a sparkline while the list is hovered (CSS). */}
+              <span class="ref-count" style={{ color: theme.stats.views }}>
+                <span class="ref-num">{num(r.visits)}</span>
+                <span class="ref-spark" aria-hidden="true">
+                  <Chart
+                    days={props.days}
+                    lines={[{ values: r.daily, color: theme.stats.views, scale: "count" }]}
+                    maxes={max()}
+                    height={16}
+                    lineWidth={1.25}
+                  />
+                </span>
+              </span>
+            </div>
+          );
+        }}
+      </Paged>
+    </div>
   );
 }
 
 // Shows `items` 10 at a time, with a row of page dots when there are more.
+// The list keeps a full page's height, dots included, however few items
+// there are.
 function Paged<T>(props: { items: T[]; size?: number; children: (item: T) => JSX.Element }) {
   const size = () => props.size ?? 10;
   const [page, setPage] = createSignal(0);
@@ -333,11 +406,13 @@ function Paged<T>(props: { items: T[]; size?: number; children: (item: T) => JSX
 
   return (
     <>
-      <For each={props.items.slice(start(), start() + size())}>
-        {(item) => props.children(item)}
-      </For>
-      <Show when={pages() > 1}>
-        <div class="pager">
+      <div class="paged" style={{ "--rows": size() }}>
+        <For each={props.items.slice(start(), start() + size())}>
+          {(item) => props.children(item)}
+        </For>
+      </div>
+      <div class="pager">
+        <Show when={pages() > 1}>
           <For each={Array.from({ length: pages() }, (_, i) => i)}>
             {(i) => (
               <button
@@ -348,99 +423,51 @@ function Paged<T>(props: { items: T[]; size?: number; children: (item: T) => JSX
               />
             )}
           </For>
-        </div>
-      </Show>
+        </Show>
+      </div>
     </>
   );
 }
 
-// A list row. With `nested`, clicking it shows or hides the rows beneath it
-// (rendered only while open).
-function Row(props: {
-  label: string;
-  views: number;
-  new: number;
-  level: number;
-  nested?: () => JSX.Element;
+// A page with its views, visitors and new visitors, which give way to a
+// sparkline of its daily views while the list is hovered (CSS). Clicking it
+// filters everything else to that page (or clears the filter).
+function PageItem(props: {
+  page: PageRow;
+  days: number[];
+  max: Record<string, number>;
+  active: boolean;
+  onSelect: (page: string | null) => void;
 }) {
-  const [open, setOpen] = createSignal(false);
-  const cells = () => (
-    <>
-      <span
-        class="label"
-        title={props.label}
-        style={{ "padding-left": `${props.level * 1.25}rem` }}
-      >
-        <Path text={props.label} />
-      </span>
+  return (
+    <button
+      class="row"
+      classList={{ active: props.active }}
+      title={props.active ? "Clear filter" : `Only views of ${props.page.path}`}
+      aria-pressed={props.active}
+      onClick={() => props.onSelect(props.active ? null : props.page.path)}
+    >
+      {/* "/posts/x/" shows as "posts/x"; the home page stays "/". */}
+      <span class="label path">{props.page.path.replace(/^\/+|\/+$/g, "") || "/"}</span>
       <span class="num" style={{ color: theme.stats.views }}>
-        {num(props.views)}
+        {num(props.page.views)}
+      </span>
+      <span class="num" style={{ color: theme.stats.visitors }}>
+        {num(props.page.visitors)}
       </span>
       <span class="num" style={{ color: theme.stats.new }}>
-        {props.new > 0 ? num(props.new) : ""}
+        {props.page.new > 0 ? num(props.page.new) : ""}
       </span>
-    </>
-  );
-
-  return (
-    <Show
-      when={props.nested}
-      fallback={
-        <div class="row" classList={{ inner: props.level > 0 }}>
-          {cells()}
-        </div>
-      }
-    >
-      {(nested) => (
-        <>
-          <button
-            class="row expandable"
-            classList={{ inner: props.level > 0 }}
-            aria-expanded={open()}
-            onClick={() => setOpen(!open())}
-          >
-            {cells()}
-          </button>
-          <Show when={open()}>{nested()()}</Show>
-        </>
-      )}
-    </Show>
-  );
-}
-
-// Page paths are monospace; other labels (referrers, "Direct") are plain.
-function Path(props: { text: string }) {
-  return (
-    <Show when={props.text.startsWith("/")} fallback={props.text}>
-      {/* "/posts/x/" shows as "posts/x"; the home page stays "/". */}
-      <span class="path">{props.text.replace(/^\/+|\/+$/g, "") || "/"}</span>
-    </Show>
-  );
-}
-
-// Tabler "calendar-time", stroked in the current text colour. It labels the
-// period select, so it carries the accessible name.
-function CalendarIcon() {
-  return (
-    <svg
-      width="26"
-      height="26"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      role="img"
-    >
-      <title>Time period</title>
-      <path d="M11.795 21h-6.795a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4" />
-      <path d="M14 18a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" />
-      <path d="M15 3v4" />
-      <path d="M7 3v4" />
-      <path d="M3 11h16" />
-      <path d="M18 16.496v1.504l1 1" />
-    </svg>
+      <span class="page-spark" aria-hidden="true">
+        <Chart
+          days={props.days}
+          lines={[{ values: props.page.daily, color: theme.stats.views, scale: "count" }]}
+          maxes={props.max}
+          height={16}
+          lineWidth={1.25}
+        />
+      </span>
+    </button>
   );
 }
 
@@ -461,6 +488,56 @@ function BounceIcon() {
       <path d="M10 18h4" />
       <path d="M3 8a9 9 0 0 1 9 9v1l1.428 -4.285a12 12 0 0 1 6.018 -6.938l.554 -.277" />
       <path d="M15 6h5v5" />
+    </svg>
+  );
+}
+
+// Tabler "clock", stroked in the current text colour.
+function ClockIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" />
+      <path d="M12 7v5l3 3" />
+    </svg>
+  );
+}
+
+// Tabler "percentage" circle, with a slice filled clockwise from the top
+// for `pct` (0-100).
+function PieIcon(props: { pct: number }) {
+  const slice = () => {
+    const p = Math.min(100, Math.max(0, props.pct));
+    if (p <= 0) return null;
+    if (p >= 100) return "M12 3a9 9 0 1 1 0 18a9 9 0 1 1 0 -18";
+    const a = (p / 100) * 2 * Math.PI;
+    const x = 12 + 9 * Math.sin(a);
+    const y = 12 - 9 * Math.cos(a);
+    return `M12 12V3A9 9 0 ${p > 50 ? 1 : 0} 1 ${x.toFixed(3)} ${y.toFixed(3)}Z`;
+  };
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <Show when={slice()}>{(d) => <path d={d()} fill="currentColor" stroke="none" />}</Show>
+      <path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" />
     </svg>
   );
 }
