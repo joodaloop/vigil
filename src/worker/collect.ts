@@ -1,4 +1,5 @@
 import { UAParser } from "ua-parser-js";
+import { COUNT_END, COUNT_HIT, newToHost } from "./counters";
 import { internAll } from "./strings";
 import { readState, stateCookie, type VisitorState } from "./session";
 import { TZ_COUNTRY } from "./tz-country";
@@ -38,23 +39,13 @@ function isIp(host: string) {
     return /^[\d.]+$/.test(host) || host.includes(":");
 }
 
-// The site is the cookie domain: the last two labels of the host, so all
-// subdomains share one visitor. (Wrong for hosts like x.co.uk; none in use.)
-function siteFor(host: string): { site: string; cookieDomain: string | null } {
-    if (host === "localhost" || isIp(host)) return { site: host, cookieDomain: null };
-    const site = host.split(".").slice(-2).join(".");
-    return { site, cookieDomain: site };
-}
-
-// Sites (cookie domains) we accept hits for, from the ALLOWED_SITES var:
-// "joodaloop.com,example.org". Subdomains are covered by their site.
-function allowedSites(env: Env): Set<string> {
-    return new Set(
-        (env.ALLOWED_SITES ?? "")
-            .split(",")
-            .map((s) => s.trim().toLowerCase())
-            .filter(Boolean),
-    );
+// The site (cookie domain) a host is listed under in the config, or null if
+// it isn't listed. Only listed hosts are collected, since only they're shown.
+function siteForHost(host: string, sites: Env["SITES"]): string | null {
+    for (const { site, hosts } of sites) {
+        if (hosts.some((h) => h.host.toLowerCase() === host)) return site.toLowerCase();
+    }
+    return null;
 }
 
 function isSameSite(host: string, site: string) {
@@ -83,10 +74,11 @@ export async function handleHit(request: Request, env: Env): Promise<Response> {
         return new Response("Bad request", { status: 400, headers: noStore });
     }
 
-    const { site, cookieDomain } = siteFor(host);
-    if (!allowedSites(env).has(site)) {
+    const site = siteForHost(host, env.SITES ?? []);
+    if (!site) {
         return new Response("Forbidden", { status: 403, headers: noStore });
     }
+    const cookieDomain = site === "localhost" || isIp(site) ? null : site;
     const page = host + path;
     const state = await readState(request, env.COOKIE_SECRET);
 
@@ -146,23 +138,25 @@ export async function handleHit(request: Request, env: Env): Promise<Response> {
         );
     }
 
+    // A new visitor's id is the one just inserted above.
+    const visitorSql = state ? "?4" : "(SELECT MAX(id) FROM visitors)";
+
     // ids are assigned here, inside the write transaction, so id order matches
     // ts order and an arrival can reference its own id.
     statements.push(
         env.DB.prepare(
             `INSERT INTO hits (id, site, host, page, visitor_id, entry_hit_id, src,
-                               utm_source, utm_medium, utm_campaign)
-             VALUES (${nextId}, ?, ?, ?,
-                     ${state ? "?" : "(SELECT MAX(id) FROM visitors)"},
-                     ${arrival ? nextId : "?"},
-                     ?, ?, ?, ?)
+                               utm_source, utm_medium, utm_campaign, is_new)
+             VALUES (${nextId}, ?1, ?2, ?3, ${visitorSql},
+                     ${arrival ? nextId : "?5"},
+                     ?6, ?7, ?8, ?9, ${newToHost(visitorSql, "?2")})
              RETURNING id`,
         ).bind(
             siteId,
             hostId,
             pageId,
-            ...(state ? [state.visitorId] : []),
-            ...(arrival ? [] : [state!.entryHitId]),
+            state?.visitorId ?? null,
+            arrival ? null : state!.entryHitId,
             arrival ? srcId : (srcId ?? state!.lastPage),
             utmSource,
             utmMedium,
@@ -172,6 +166,7 @@ export async function handleHit(request: Request, env: Env): Promise<Response> {
             `INSERT OR IGNORE INTO days (day, first_hit_id)
              SELECT ts / 86400, id FROM hits WHERE id = (SELECT MAX(id) FROM hits)`,
         ),
+        ...COUNT_HIT.map((sql) => env.DB.prepare(sql)),
     );
 
     const results = await env.DB.batch<{ id: number }>(statements);
@@ -199,14 +194,18 @@ export async function handleEnd(request: Request, env: Env): Promise<Response> {
     const engaged = Math.min(MAX_ENGAGED_S, Math.max(0, Math.round(Number(body.e) || 0)));
     const scroll = Math.min(100, Math.max(0, Math.round(Number(body.s) || 0)));
 
-    // Beacons repeat with running totals and can arrive out of order, so only
-    // ever move the values up. visitor_id stops anyone updating others' hits.
-    await env.DB.prepare(
-        `UPDATE hits SET engaged_s = MAX(IFNULL(engaged_s, 0), ?), scroll_pct = MAX(IFNULL(scroll_pct, 0), ?)
-         WHERE id = ? AND visitor_id = ?`,
-    )
-        .bind(engaged, scroll, body.id, state.visitorId)
-        .run();
+    // Beacons repeat and arrive out of order. Only write if a value is missing
+    // or increases. visitor_id stops anyone updating others' hits. The day's
+    // engagement sums go first, while the hit still has its old values.
+    const params = [engaged, scroll, body.id, state.visitorId];
+    await env.DB.batch([
+        env.DB.prepare(COUNT_END).bind(...params),
+        env.DB.prepare(
+            `UPDATE hits SET engaged_s = MAX(IFNULL(engaged_s, 0), ?1), scroll_pct = MAX(IFNULL(scroll_pct, 0), ?2)
+             WHERE id = ?3 AND visitor_id = ?4
+               AND (engaged_s IS NULL OR scroll_pct IS NULL OR engaged_s < ?1 OR scroll_pct < ?2)`,
+        ).bind(...params),
+    ]);
 
     return new Response(null, { status: 204, headers: noStore });
 }

@@ -1,18 +1,24 @@
 import { render } from "@solidjs/web";
 import { App } from "./App";
-import { theme } from "./theme";
+import { applyTheme, theme } from "./theme";
+import type { SiteConfig } from "../shared/types";
 import "./App.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing #root");
 
-const style = document.documentElement.style;
-style.setProperty("--bg", theme.background);
-style.setProperty("--surface", theme.surface);
-style.setProperty("--text", theme.text);
-style.setProperty("--muted", theme.muted);
-style.setProperty("--views", theme.stats.views);
-style.setProperty("--visitors", theme.stats.visitors);
-style.setProperty("--new", theme.stats.new);
+applyTheme(theme());
 
-render(() => <App />, root);
+async function start() {
+  const response = await fetch("/api/config");
+  if (!response.ok) throw new Error(`Config request failed: ${response.status}`);
+  const { sites } = (await response.json()) as { sites: SiteConfig[] };
+  if (!Array.isArray(sites) || !sites.some((site) => site.hosts?.length)) {
+    throw new Error("No dashboard hosts configured in wrangler.json");
+  }
+  render(() => <App sites={sites} />, root!);
+}
+
+start().catch((error) => {
+  root.textContent = `Couldn't load Vigil: ${String(error)}`;
+});

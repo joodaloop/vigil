@@ -1,9 +1,12 @@
 # Vigil
 
-Small, cookie-based analytics for my own sites. A Cloudflare Worker + D1,
+Small, cookie-based analytics for your sites. A Cloudflare Worker + D1,
 fed by a tracker that only counts a page view once the reader scrolls.
 
-- **Schema and query recipes:** [`migrations/0001_init.sql`](migrations/0001_init.sql)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/joodaloop/vigil)
+
+- **Schema and query recipes:** [`migrations/0001_init.sql`](migrations/0001_init.sql), plus the
+  dashboard's per-host counters in [`migrations/0002_counters.sql`](migrations/0002_counters.sql)
 - **Collector:** `src/worker/collect.ts` (`POST /_v/hit`, `POST /_v/end`)
 - **Tracker:** `src/tracker/v.js`, served at `/_v/v.js`
 - **Dashboard:** `src/client/` (Solid), API goes in `src/worker/index.ts` under `/api/*`
@@ -22,13 +25,35 @@ fed by a tracker that only counts a page view once the reader scrolls.
 
 ## Adding a site (Netlify)
 
-1. Proxy `/_v/*` to the Worker, in the site's `_redirects`:
+1. Edit `vars.SITES` in [`wrangler.json`](wrangler.json). Replace the local
+   example with your site root and the hosts you want on the dashboard:
+
+   ```json
+   "vars": {
+       "SITES": [
+           {
+               "site": "example.co.uk",
+               "hosts": [
+                   { "host": "example.co.uk", "name": "Example" },
+                   { "host": "blog.example.co.uk", "name": "Blog" }
+               ]
+           }
+       ]
+   }
+   ```
+
+   Each host gets its own panel on the dashboard, and only listed hosts are
+   collected. The `site` is the cookie domain its hosts share, so a reader
+   keeps one identity (and one trip) across them; every host must be the site
+   itself or one of its subdomains. Add another entry for each separate domain.
+
+2. Proxy `/_v/*` to the Worker, in the site's `_redirects`:
 
    ```
    /_v/*  https://vigil.<your-subdomain>.workers.dev/_v/:splat  200!
    ```
 
-2. Add the tracker to every page:
+3. Add the tracker to every page:
 
    ```html
    <script defer src="/_v/v.js"></script>
@@ -42,8 +67,7 @@ tracking won't work.
 ```sh
 pnpm install
 pnpm db:migrate            # local D1
-pnpm db:seed               # optional: 90 days of dummy traffic
-printf 'VIGIL_DEV=1\nALLOWED_SITES=joodaloop.com,localhost\nCOOKIE_SECRET=%s\n' "$(openssl rand -base64 32)" > .dev.vars
+printf 'VIGIL_DEV=1\nCOOKIE_SECRET=%s\n' "$(openssl rand -base64 32)" > .dev.vars
 pnpm dev
 ```
 
@@ -56,16 +80,38 @@ pnpm wrangler d1 execute DB --local --command "SELECT * FROM hits"
 
 ## Configuration
 
-- `ALLOWED_SITES` (in `wrangler.json` `vars`): comma-separated root domains to
-  accept hits for, e.g. `joodaloop.com,example.org`. Subdomains are included.
-  Hits for anything else get a 403.
+- `vars.SITES` in [`wrangler.json`](wrangler.json) is the single site configuration
+  used by the collector and dashboard. The Worker serves its display data at
+  `/api/config`. Its default `localhost` entry supports local testing. Keep it
+  while testing locally, then replace or remove it before deploying.
+- `database_id` in `wrangler.json` starts as an all-zero placeholder. The deploy
+  button fills it in; when deploying by hand, replace it with the ID returned by
+  `wrangler d1 create`.
 - `COOKIE_SECRET` (a Wrangler secret): signs the visitor cookie, so edited or
   made-up cookies are ignored. Changing it makes every visitor look new once.
 
 ## Deploying
 
+The quickest route is the **Deploy to Cloudflare** button above. It copies
+this repo to your GitHub or GitLab account, creates the D1 database, asks for
+`COOKIE_SECRET`, and deploys. After that, edit `vars.SITES` in your copy's
+`wrangler.json` (see [Adding a site](#adding-a-site-netlify)) and push; each
+push redeploys. Until you do, the Worker only accepts hits from `localhost`.
+
+To deploy by hand instead:
+
 ```sh
-pnpm wrangler d1 create vigil          # once; put the database_id in wrangler.json
+pnpm wrangler d1 create vigil          # once; copy its database_id into wrangler.json
 pnpm wrangler secret put COOKIE_SECRET # once; paste a long random string
 pnpm run deploy                        # builds, applies migrations remotely, deploys
+```
+
+### Deploying from a clone
+
+To keep your own `database_id` and `SITES` out of `wrangler.json` (so pulling
+updates doesn't conflict), copy it to `wrangler.prod.json`, which is
+gitignored, put your values there, and deploy with:
+
+```sh
+pnpm run deploy:prod
 ```

@@ -16,11 +16,16 @@
         {
             "binding": "DB",
             "database_name": "vigil",
-            "database_id": "f9339688-8263-4602-b80e-91940498bd9e",
+            "database_id": "00000000-0000-0000-0000-000000000000",
             "migrations_dir": "migrations"
         }
     ],
     "vars": {
-        "ALLOWED_SITES": "joodaloop.com,anjalishriva.com"
+        "SITES": [
+            {
+                "site": "localhost",
+                "hosts": [{ "host": "localhost", "name": "Local test" }]
+            }
+        ]
     }
 }

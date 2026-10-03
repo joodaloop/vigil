@@ -1,4 +1,4 @@
-// Response shapes shared by the Worker API and the dashboard.
+// Types shared by the Worker and dashboard.
 
 export type HostTotals = {
     views: number;
@@ -19,8 +19,10 @@ export type HostDaily = {
 // Views, distinct visitors and new visitors.
 export type Counts = { views: number; visitors: number; new: number };
 
-export type PageRow = Counts & {
+export type PageRow = {
     path: string;
+    views: number;
+    new: number; // visitors whose first ever hit on the host was this page
     daily: number[]; // views per day
 };
 
@@ -55,4 +57,8 @@ export type Overview = {
 export type HostSummaries = {
     days: number[];
     hosts: Record<string, HostSummary>;
+};
+export type SiteConfig = {
+    site: string;
+    hosts: { host: string; name: string }[];
 };

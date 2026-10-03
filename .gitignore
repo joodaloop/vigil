@@ -10,6 +10,7 @@ build/
 .wrangler/
 .dev.vars
 .dev.vars.*
+!.dev.vars.example
 
 # Env / secrets
 .env
@@ -36,3 +37,6 @@ Thumbs.db
 .parcel-cache/
 .vite/
 coverage/
+
+# Your own deploy config (see README: "Deploying from a clone")
+wrangler.prod.json

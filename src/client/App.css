@@ -368,11 +368,11 @@ h2 {
   font-size: var(--list-text);
 }
 
-/* A page: its path, then views, visitors and new visitors. */
+/* A page: its path, then views and new visitors. */
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(3, 2.3rem);
+  grid-template-columns: minmax(0, 1fr) repeat(2, 2.3rem);
   gap: 0.4rem;
   width: 100%;
 }

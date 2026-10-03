@@ -1,13 +1,12 @@
 import { createMemo, createSignal, Errored, For, isPending, latest, Loading, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import type { HostStats, HostSummaries, HostSummary, Overview, PageRow, Referrer } from "../shared/types";
+import type { HostStats, HostSummaries, Overview, PageRow, Referrer, SiteConfig } from "../shared/types";
 import { Chart, type Line } from "./Chart";
-import { DEFAULT_PERIOD, PERIODS, SITES } from "./config";
+import { DEFAULT_PERIOD, PERIODS } from "./config";
 import { referrerName } from "./referrers";
-import { theme } from "./theme";
+import { nextTheme, theme } from "./theme";
 
-// Every host on the dashboard, in display order, with the site it belongs to.
-const HOSTS = SITES.flatMap((s) => s.hosts.map((h) => ({ ...h, site: s.site })));
+type Host = SiteConfig["hosts"][number];
 
 type ChartKind = "line" | "bars";
 // What's fetched. The chart style isn't part of it, so changing that doesn't
@@ -21,12 +20,12 @@ type Query = {
 
 const initialParams = new URLSearchParams(location.search);
 
-function initialQuery(): Query {
+function initialQuery(hosts: Host[]): Query {
   const params = initialParams;
   const n = Number(params.get("days"));
   const host = params.get("host");
   return {
-    host: HOSTS.some((h) => h.host === host) ? host! : HOSTS[0].host,
+    host: hosts.some((h) => h.host === host) ? host! : hosts[0].host,
     days: PERIODS.includes(n) ? n : DEFAULT_PERIOD,
     ref: params.get("ref") || null,
     page: params.get("page") || null,
@@ -47,27 +46,6 @@ async function get<T>(path: string, params: Record<string, string | null>): Prom
   const r = await fetch(`${path}?${search}`);
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
   return r.json();
-}
-
-// The open host in full.
-function fetchOverview(q: Query) {
-  const site = HOSTS.find((h) => h.host === q.host)!.site;
-  return get<Overview>("/api/overview", {
-    site,
-    host: q.host,
-    days: String(q.days),
-    ref: q.ref,
-    page: q.page,
-  });
-}
-
-// Headline numbers for every host, for the sidebar. Never filtered.
-async function fetchSummaries(days: number) {
-  const all = await Promise.all(
-    SITES.map((s) => get<HostSummaries>("/api/hosts", { site: s.site, days: String(days) })),
-  );
-  const hosts: Record<string, HostSummary> = Object.assign({}, ...all.map((a) => a.hosts));
-  return { days: all[0]?.days ?? [], hosts };
 }
 
 // 950 -> "950", 4321 -> "4.3k", 17694 -> "17.7k", 1250000 -> "1.3M"
@@ -95,17 +73,33 @@ function chartLines(
 ): Line[] {
   if (!h) return [];
   return [
-    { values: h.daily.views, color: theme.stats.views, scale: "count" },
-    { values: h.daily.visitors, color: theme.stats.visitors, scale: "count" },
-    { values: h.daily.new, color: theme.stats.new, scale: "count" },
+    { values: h.daily.views, color: theme().stats.views, scale: "count" },
+    { values: h.daily.visitors, color: theme().stats.visitors, scale: "count" },
+    { values: h.daily.new, color: theme().stats.new, scale: "count" },
   ];
 }
 
-export function App() {
-  const [query, setQuery] = createSignal(initialQuery());
+export function App(props: { sites: SiteConfig[] }) {
+  // Every dashboard host, in display order.
+  const HOSTS = props.sites.flatMap((s) => s.hosts);
+  const [query, setQuery] = createSignal(initialQuery(HOSTS));
   const [chart, setChart] = createSignal<ChartKind>(
     initialParams.get("chart") === "bars" ? "bars" : "line",
   );
+  // The open host in full.
+  function fetchOverview(q: Query) {
+    return get<Overview>("/api/overview", {
+      host: q.host,
+      days: String(q.days),
+      ref: q.ref,
+      page: q.page,
+    });
+  }
+
+  // Headline numbers for every host, for the sidebar. Never filtered.
+  function fetchSummaries(days: number) {
+    return get<HostSummaries>("/api/hosts", { days: String(days) });
+  }
   // The open host's stats, along with the query they answer. While a new
   // query loads, this (and everything drawn from it) keeps showing the last
   // one, so the panel's name, filters, numbers and chart all switch together.
@@ -137,7 +131,11 @@ export function App() {
     <main>
       <nav class="sidebar">
         <div class="sidebar-top">
-          <h1>Vigil</h1>
+          <h1>
+            <button type="button" onClick={nextTheme} title={`Theme: ${theme().name}. Click for the next one.`}>
+              Vigil
+            </button>
+          </h1>
           {/* Shown like a total; the real select sits invisibly on top at
               normal size, so its native menu isn't oversized. */}
           <div class="days-picker">
@@ -191,11 +189,11 @@ export function App() {
                 <span class="host-name">{h.name}</span>
                 <Show when={!empty()} fallback={<span class="muted">No stats yet</span>}>
                   <span class="host-nums">
-                    <span style={{ color: theme.stats.views }}>{num(s()?.totals.views ?? 0)}</span>
-                    <span style={{ color: theme.stats.visitors }}>
+                    <span style={{ color: theme().stats.views }}>{num(s()?.totals.views ?? 0)}</span>
+                    <span style={{ color: theme().stats.visitors }}>
                       {num(s()?.totals.visitors ?? 0)}
                     </span>
-                    <span style={{ color: theme.stats.new }}>{num(s()?.totals.new ?? 0)}</span>
+                    <span style={{ color: theme().stats.new }}>{num(s()?.totals.new ?? 0)}</span>
                     <Chart
                       days={summaries().days}
                       lines={chartLines(s())}
@@ -278,7 +276,7 @@ function Stats(props: {
               the whole period) hidden. */}
           <div class={["totals", { "one-day": day() !== null }]}>
             <div>
-              <div style={{ color: theme.stats.views }}>
+              <div style={{ color: theme().stats.views }}>
                 <div class="big">{num(shown("views"))}</div>
                 <div class="big-label">Views</div>
               </div>
@@ -293,7 +291,7 @@ function Stats(props: {
               </div>
             </div>
             <div>
-              <div style={{ color: theme.stats.visitors }}>
+              <div style={{ color: theme().stats.visitors }}>
                 <div class="big">{num(shown("visitors"))}</div>
                 <div class="big-label">Visitors</div>
               </div>
@@ -310,7 +308,7 @@ function Stats(props: {
               </div>
             </div>
             <div>
-              <div style={{ color: theme.stats.new }}>
+              <div style={{ color: theme().stats.new }}>
                 <div class="big">{num(shown("new"))}</div>
                 <div class="big-label">New visitors</div>
               </div>
@@ -328,7 +326,7 @@ function Stats(props: {
           headroom={40}
           lineWidth={2}
           bars={props.bars}
-          dim={(c) => tint(c, theme.surface, 0.35)}
+          dim={(c) => tint(c, theme().surface, 0.35)}
           onHover={setDay}
         />
       </div>
@@ -399,12 +397,12 @@ function Referrers(props: {
                 {referrerName(r.domain)}
               </button>
               {/* Count, swapped for a sparkline while the list is hovered (CSS). */}
-              <span class="ref-count" style={{ color: theme.stats.views }}>
+              <span class="ref-count" style={{ color: theme().stats.views }}>
                 <span class="ref-num">{num(r.visits)}</span>
                 <span class="ref-spark" aria-hidden="true">
                   <Chart
                     days={props.days}
-                    lines={[{ values: r.daily, color: theme.stats.views, scale: "count" }]}
+                    lines={[{ values: r.daily, color: theme().stats.views, scale: "count" }]}
                     maxes={max()}
                     height={16}
                     lineWidth={1.25}
@@ -455,7 +453,7 @@ function Paged<T>(props: { items: T[]; size?: number; children: (item: T) => JSX
   );
 }
 
-// A page with its views, visitors and new visitors, which give way to a
+// A page with its views and new visitors, which give way to a
 // sparkline of its daily views while the list is hovered (CSS). Clicking it
 // filters everything else to that page (or clears the filter).
 function PageItem(props: {
@@ -474,19 +472,16 @@ function PageItem(props: {
     >
       {/* "/posts/x/" shows as "posts/x"; the home page stays "/". */}
       <span class="label path">{props.page.path.replace(/^\/+|\/+$/g, "") || "/"}</span>
-      <span class="num" style={{ color: theme.stats.views }}>
+      <span class="num" style={{ color: theme().stats.views }}>
         {num(props.page.views)}
       </span>
-      <span class="num" style={{ color: theme.stats.visitors }}>
-        {num(props.page.visitors)}
-      </span>
-      <span class="num" style={{ color: theme.stats.new }}>
+      <span class="num" style={{ color: theme().stats.new }}>
         {props.page.new > 0 ? num(props.page.new) : ""}
       </span>
       <span class="page-spark" aria-hidden="true">
         <Chart
           days={props.days}
-          lines={[{ values: props.page.daily, color: theme.stats.views, scale: "count" }]}
+          lines={[{ values: props.page.daily, color: theme().stats.views, scale: "count" }]}
           maxes={props.max}
           height={16}
           lineWidth={1.25}
