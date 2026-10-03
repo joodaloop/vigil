@@ -380,8 +380,25 @@ h2 {
   min-width: 0;
 }
 
+/* An icon, then the name, cut short if it has to be. */
 .ref-name {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   min-width: 0;
+}
+
+.ref-icon {
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px; /* the largest icon */
+  color: var(--muted);
+}
+
+.ref-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Just the number's width, until hovering makes room for the sparkline; so

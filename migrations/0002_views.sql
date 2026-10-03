@@ -61,6 +61,39 @@ DROP INDEX hits_visitor_host;
 DROP TABLE hits;
 ALTER TABLE hits_0002 RENAME TO hits;
 
+-- One domain per referring site, as the collector now records them (see
+-- canonicalSource in src/shared/referrers.ts): another domain of the same site
+-- becomes that one ("t.co" is "x.com"), and subdomains that say nothing about
+-- where the reader came from become the site ("old.reddit.com" is
+-- "reddit.com"). Matches that table as it was when this was written.
+UPDATE hits SET source = CASE
+    WHEN source LIKE '%.google.com' THEN 'google.com'
+    WHEN source LIKE '%.bing.com' THEN 'bing.com'
+    WHEN source LIKE '%.duckduckgo.com' THEN 'duckduckgo.com'
+    WHEN source LIKE '%.kagi.com' THEN 'kagi.com'
+    WHEN source LIKE '%.ecosia.org' THEN 'ecosia.org'
+    WHEN source LIKE '%.yandex.ru' THEN 'yandex.ru'
+    WHEN source LIKE '%.baidu.com' THEN 'baidu.com'
+    WHEN source LIKE '%.lobste.rs' THEN 'lobste.rs'
+    WHEN source LIKE '%.reddit.com' THEN 'reddit.com'
+    WHEN source LIKE '%.x.com' THEN 'x.com'
+    WHEN source = 'twitter.com' OR source LIKE '%.twitter.com' THEN 'x.com'
+    WHEN source = 't.co' OR source LIKE '%.t.co' THEN 'x.com'
+    WHEN source LIKE '%.bsky.app' THEN 'bsky.app'
+    WHEN source LIKE '%.threads.net' THEN 'threads.net'
+    WHEN source LIKE '%.facebook.com' THEN 'facebook.com'
+    WHEN source LIKE '%.instagram.com' THEN 'instagram.com'
+    WHEN source LIKE '%.linkedin.com' THEN 'linkedin.com'
+    WHEN source = 'lnkd.in' OR source LIKE '%.lnkd.in' THEN 'linkedin.com'
+    WHEN source LIKE '%.youtube.com' THEN 'youtube.com'
+    WHEN source LIKE '%.github.com' THEN 'github.com'
+    WHEN source LIKE '%.chatgpt.com' THEN 'chatgpt.com'
+    WHEN source LIKE '%.perplexity.ai' THEN 'perplexity.ai'
+    WHEN source LIKE '%.claude.ai' THEN 'claude.ai'
+    ELSE source
+END
+WHERE source != '' AND source NOT LIKE '/%';
+
 -- Unique visitors under a dashboard filter (src/worker/filtered.ts): a page's
 -- or a source's hits in a period, with who made them, read from the index
 -- alone. The dashboard's other numbers come from `views` and `visitors`.

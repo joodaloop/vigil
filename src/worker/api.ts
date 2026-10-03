@@ -15,7 +15,9 @@ import { configuredSites } from "./sites";
 // of the filter's hits (filtered.ts), since readers can't be summed. A source is another site's domain, or on a click within the
 // site, the path of the page it came from (paths start with "/").
 
-type ViewsRow = { day: number; page: string; source: string; views: number; new: number; visitors: number; reads: number };
+type DailyRow = { day: number; views: number; visitors: number; new: number; reads: number };
+type PageDayRow = { page: string; day: number; views: number; new: number };
+type SourceDayRow = { source: string; day: number; views: number };
 type DeviceRow = { device: string | null; visitors: number; bounced: number };
 type HostDailyRow = { host: string; day: number; views: number; visitors: number; new: number };
 type HostVisitorsRow = { host: string; visitors: number };
@@ -52,12 +54,30 @@ async function overview(
 ): Promise<Overview> {
     const { firstDay, days } = period(numDays);
     const result: Overview = { days, ref, page, stats: emptyHost(numDays) };
+    // The sums are grouped in SQL, so the Worker gets back a few hundred
+    // rows rather than every (day, page, source) one. Each list ignores its
+    // own filter, so every option stays listed while one is picked.
+    const q = (sql: string, onPage: boolean, onRef: boolean) => {
+        const where = ["host = ?", "day >= ?"];
+        const params: unknown[] = [host, firstDay];
+        if (onPage && page) where.push("page = ?"), params.push(page);
+        if (onRef && ref) where.push("source = ?"), params.push(ref);
+        return env.DB.prepare(sql.replace("$WHERE", where.join(" AND "))).bind(...params);
+    };
+
     const byFilter = ref || page ? filteredVisitors(host, firstDay, page, ref) : null;
-    const [rows, people, filteredDaily] = (await env.DB.batch([
-        // The period's rows, read once; everything below is summed from them.
-        env.DB.prepare(
-            "SELECT day, page, source, views, new, visitors, reads FROM views WHERE host = ? AND day >= ?",
-        ).bind(host, firstDay),
+    const [daily, pages, sources, people, filteredDaily] = (await env.DB.batch([
+        q(
+            `SELECT day, SUM(views) AS views, SUM(visitors) AS visitors, SUM(new) AS new, SUM(reads) AS reads
+             FROM views WHERE $WHERE GROUP BY day`,
+            true,
+            true,
+        ),
+        q(`SELECT page, day, SUM(views) AS views, SUM(new) AS new FROM views WHERE $WHERE GROUP BY page, day`, false, true),
+        // Where views came from: another site, or on a click within the site,
+        // the previous page. With a page filter, where that page's readers
+        // came from.
+        q(`SELECT source, day, SUM(views) AS views FROM views WHERE $WHERE AND source != '' GROUP BY source, day`, true, false),
         // Visitors in the period, by device. Unfiltered: everyone whose
         // latest visit is in it, since the period ends today, read from the
         // covering index.
@@ -69,48 +89,46 @@ async function overview(
               ).bind(host, firstDay),
         // Filtered, visitors per day; unfiltered, they're summed from `views`.
         ...(byFilter ? [env.DB.prepare(byFilter.daily).bind(...byFilter.params)] : []),
-    ])) as [D1Result<ViewsRow>, D1Result<DeviceRow>, D1Result<{ day: number; visitors: number }> | undefined];
+    ])) as [
+        D1Result<DailyRow>,
+        D1Result<PageDayRow>,
+        D1Result<SourceDayRow>,
+        D1Result<DeviceRow>,
+        D1Result<{ day: number; visitors: number }> | undefined,
+    ];
 
     const stats = result.stats;
     const t = stats.totals;
-    const byPage = new Map<string, PageRow>();
-    const bySource = new Map<string, Referrer>();
 
-    // Each list ignores its own filter, so every option stays listed while
-    // one is picked.
-    for (const r of rows.results) {
+    for (const r of daily.results) {
         const i = r.day - firstDay;
-        const onPage = !page || r.page === page;
-        const onRef = !ref || r.source === ref;
+        stats.daily.views[i] = r.views;
+        stats.daily.new[i] = r.new;
+        // Filtered, these are replaced below: summed from `views` they'd count
+        // readers on the page of their first hit of the day.
+        stats.daily.visitors[i] = byFilter ? 0 : r.visitors;
+        t.views += r.views;
+        t.new += r.new; // each visitor is new on a site at most once
+        t.reads += r.reads;
+    }
 
-        // The chart and totals: both filters.
-        if (onPage && onRef) {
-            stats.daily.views[i] += r.views;
-            stats.daily.new[i] += r.new;
-            t.views += r.views;
-            t.new += r.new; // each visitor is new on a site at most once
-            t.reads += r.reads;
-            // Unfiltered, each visitor counts once a day across all rows.
-            if (!byFilter) stats.daily.visitors[i] += r.visitors;
-        }
-        // Pages: the source filter only.
-        if (onRef) {
-            let p = byPage.get(r.page);
-            if (!p) byPage.set(r.page, (p = { path: r.page, views: 0, new: 0, daily: Array(numDays).fill(0) }));
-            p.views += r.views;
-            p.new += r.new;
-            p.daily[i] += r.views;
-        }
-        // Where views came from (another site, or the previous page): the
-        // page filter only.
-        if (onPage && r.source) {
-            let s = bySource.get(r.source);
-            if (!s) bySource.set(r.source, (s = { domain: r.source, visits: 0, daily: Array(numDays).fill(0) }));
-            s.visits += r.views;
-            s.daily[i] += r.views;
-        }
+    const byPage = new Map<string, PageRow>();
+    for (const r of pages.results) {
+        let p = byPage.get(r.page);
+        if (!p) byPage.set(r.page, (p = { path: r.page, views: 0, new: 0, daily: Array(numDays).fill(0) }));
+        p.views += r.views;
+        p.new += r.new;
+        p.daily[r.day - firstDay] = r.views;
     }
     stats.pages = [...byPage.values()].sort((a, b) => b.views - a.views);
+
+    const bySource = new Map<string, Referrer>();
+    for (const r of sources.results) {
+        let s = bySource.get(r.source);
+        if (!s) bySource.set(r.source, (s = { domain: r.source, visits: 0, daily: Array(numDays).fill(0) }));
+        s.visits += r.views;
+        s.daily[r.day - firstDay] = r.views;
+    }
     stats.referrers = [...bySource.values()].sort((a, b) => b.visits - a.visits);
 
     for (const r of filteredDaily?.results ?? []) stats.daily.visitors[r.day - firstDay] = r.visitors;

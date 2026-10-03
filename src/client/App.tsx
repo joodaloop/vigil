@@ -3,7 +3,8 @@ import type { JSX } from "@solidjs/web";
 import type { HostStats, HostSummaries, Overview, PageRow, Referrer, Site } from "../shared/types";
 import { Chart, type Line } from "./Chart";
 import { DEFAULT_PERIOD, PERIODS } from "./config";
-import { referrerName } from "./referrers";
+import { ICONS } from "./icons";
+import { referrerIcon, referrerName } from "../shared/referrers";
 import { nextTheme, theme } from "./theme";
 
 // What's shown, and fetched.
@@ -98,93 +99,103 @@ export function App(props: { sites: Site[] }) {
   // numbers, so they arrive together.
   return (
     <Loading>
-    <main>
-      <nav class="sidebar">
-        <div class="sidebar-top">
-          <h1>
-            <button type="button" onClick={nextTheme} title={`Theme: ${theme().name}. Click for the next one.`}>
-              Vigil
-            </button>
-          </h1>
-          {/* Shown like a total; the real select sits invisibly on top at
-              normal size, so its native menu isn't oversized. */}
-          <div class="days-picker">
-            <div class="days-num" aria-hidden="true">
-              {latest(() => query().days)}
-            </div>
-            <div class="days-label" aria-hidden="true">
-              days
-            </div>
-            <select
-              id="period"
-              aria-label="Time period"
-              value={latest(() => query().days)}
-              onChange={(e) => update({ days: Number(e.currentTarget.value) })}
-            >
-              <For each={PERIODS}>{(n) => <option value={n}>{n} days</option>}</For>
-            </select>
-          </div>
-        </div>
-
-        {/* One entry per host; the open one is shown in full on the right. */}
-        <Errored fallback={<p class="muted">Couldn't load hosts</p>}>
-        <For each={HOSTS}>
-          {(h) => {
-            const s = () => summaries().hosts[h.host];
-            // Marked as soon as it's picked, ahead of its stats.
-            const open = () => latest(() => query().host) === h.host;
-            // Nothing in the period.
-            const empty = () => !s()?.totals.views;
-            return (
+      <main>
+        <nav class="sidebar">
+          <div class="sidebar-top">
+            <h1>
               <button
-                class="host-item"
-                aria-pressed={open() ? "true" : "false"}
-                title={h.host}
-                disabled={empty()}
-                onClick={() => open() || update({ host: h.host, ref: null, page: null })}
+                type="button"
+                onClick={nextTheme}
+                title={`Theme: ${theme().name}. Click for the next one.`}
               >
-                <span class="host-name">{h.name}</span>
-                <Show when={!empty()} fallback={<span class="muted">No stats yet</span>}>
-                  <span class="host-nums">
-                    <span style={{ color: theme().stats.views }}>{num(s()?.totals.views ?? 0)}</span>
-                    <span style={{ color: theme().stats.visitors }}>
-                      {num(s()?.totals.visitors ?? 0)}
-                    </span>
-                    <span style={{ color: theme().stats.new }}>{num(s()?.totals.new ?? 0)}</span>
-                    <Chart
-                      days={summaries().days}
-                      lines={chartLines(s())}
-                      height={20}
-                      lineWidth={1.5}
-                    />
-                  </span>
-                </Show>
+                Vigil
               </button>
-            );
-          }}
-        </For>
-        </Errored>
-      </nav>
+            </h1>
+            {/* Shown like a total; the real select sits invisibly on top at
+              normal size, so its native menu isn't oversized. */}
+            <div class="days-picker">
+              <div class="days-num" aria-hidden="true">
+                {latest(() => query().days)}
+              </div>
+              <div class="days-label" aria-hidden="true">
+                days
+              </div>
+              <select
+                id="period"
+                aria-label="Time period"
+                value={latest(() => query().days)}
+                onChange={(e) => update({ days: Number(e.currentTarget.value) })}
+              >
+                <For each={PERIODS}>{(n) => <option value={n}>{n} days</option>}</For>
+              </select>
+            </div>
+          </div>
 
-      <section class={["panel", { updating: updating() }]}>
-        <Errored
-          fallback={(e) => (
-            <p class="muted error">Couldn't load stats: {String((e() as Error)?.message ?? e())}</p>
-          )}
-        >
-          <Stats
-            name={HOSTS.find((h) => h.host === view().q.host)!.name}
-            host={view().q.host}
-            stats={view().overview.stats}
-            days={view().overview.days}
-            activeRef={view().q.ref}
-            onSelectRef={(ref) => update({ ref })}
-            activePage={view().q.page}
-            onSelectPage={(page) => update({ page })}
-          />
-        </Errored>
-      </section>
-    </main>
+          {/* One entry per host; the open one is shown in full on the right. */}
+          <Errored fallback={<p class="muted">Couldn't load hosts</p>}>
+            <For each={HOSTS}>
+              {(h) => {
+                const s = () => summaries().hosts[h.host];
+                // Marked as soon as it's picked, ahead of its stats.
+                const open = () => latest(() => query().host) === h.host;
+                // Nothing in the period.
+                const empty = () => !s()?.totals.views;
+                return (
+                  <button
+                    class="host-item"
+                    aria-pressed={open() ? "true" : "false"}
+                    title={h.host}
+                    disabled={empty()}
+                    onClick={() => open() || update({ host: h.host, ref: null, page: null })}
+                  >
+                    <span class="host-name">{h.name}</span>
+                    <Show when={!empty()} fallback={<span class="muted">No stats yet</span>}>
+                      <span class="host-nums">
+                        <span style={{ color: theme().stats.views }}>
+                          {num(s()?.totals.views ?? 0)}
+                        </span>
+                        <span style={{ color: theme().stats.visitors }}>
+                          {num(s()?.totals.visitors ?? 0)}
+                        </span>
+                        <span style={{ color: theme().stats.new }}>
+                          {num(s()?.totals.new ?? 0)}
+                        </span>
+                        <Chart
+                          days={summaries().days}
+                          lines={chartLines(s())}
+                          height={20}
+                          lineWidth={1.5}
+                        />
+                      </span>
+                    </Show>
+                  </button>
+                );
+              }}
+            </For>
+          </Errored>
+        </nav>
+
+        <section class={["panel", { updating: updating() }]}>
+          <Errored
+            fallback={(e) => (
+              <p class="muted error">
+                Couldn't load stats: {String((e() as Error)?.message ?? e())}
+              </p>
+            )}
+          >
+            <Stats
+              name={HOSTS.find((h) => h.host === view().q.host)!.name}
+              host={view().q.host}
+              stats={view().overview.stats}
+              days={view().overview.days}
+              activeRef={view().q.ref}
+              onSelectRef={(ref) => update({ ref })}
+              activePage={view().q.page}
+              onSelectPage={(page) => update({ page })}
+            />
+          </Errored>
+        </section>
+      </main>
     </Loading>
   );
 }
@@ -237,12 +248,9 @@ function Stats(props: {
               </div>
               {/* Read: visible for long enough (30s unless the tracker's
                   data-read-after says otherwise). */}
-              <div class="sub stacked icons">
-                <span title="Share of views that were read">
-                  <PieIcon pct={pct(t().reads, t().views)} /> {pct(t().reads, t().views)}%
-                </span>
-                <span title="Views that stayed on screen long enough to count as read">
-                  <ClockIcon /> {num(t().reads)} read
+              <div class="sub icons">
+                <span title="Reads: views that stayed on screen long enough">
+                  <BookIcon /> {num(t().reads)}
                 </span>
               </div>
             </div>
@@ -348,7 +356,8 @@ function Referrers(props: {
                 aria-pressed={on() ? "true" : "false"}
                 onClick={() => props.onSelect(on() ? null : r.domain)}
               >
-                {referrerName(r.domain)}
+                <SourceIcon name={referrerIcon(r.domain)} />
+                <span class="ref-label">{referrerName(r.domain)}</span>
               </button>
               {/* Count, swapped for a sparkline while the list is hovered (CSS). */}
               <span class="ref-count" style={{ color: theme().stats.views }}>
@@ -449,8 +458,8 @@ function PageItem(props: {
 function BounceIcon() {
   return (
     <svg
-      width="16"
-      height="16"
+      width="18"
+      height="18"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -466,42 +475,68 @@ function BounceIcon() {
   );
 }
 
-// Tabler "clock", stroked in the current text colour.
-function ClockIcon() {
+// Each source's icon in its brand colour; brands whose logo is black in the
+// theme's text colour, so it shows on dark themes too. Other sites' links are
+// in the theme's blue and the site's own pages in its green.
+const ICON_STYLE: Record<string, { size?: number; color: () => string }> = {
+  google: { color: () => "#EA4335" },
+  bing: { color: () => "#0078D4" },
+  duckduckgo: { color: () => "#DE5833" },
+  ecosia: { color: () => "#008009" },
+  brave: { color: () => "#FB542B" },
+  yandex: { color: () => "#FC3F1D" },
+  baidu: { color: () => "#2932E1" },
+  ycombinator: { size: 18, color: () => "#FF6600" },
+  lobsters: { color: () => "#AC130D" },
+  kagi: { color: () => "#FFB318" },
+  reddit: { color: () => "#FF4500" },
+  twitter: { color: () => "#1DA1F2" },
+  bluesky: { color: () => "#1185FE" },
+  mastodon: { color: () => "#6364FF" },
+  threads: { color: () => theme().text },
+  facebook: { color: () => "#1877F2" },
+  instagram: { color: () => "#E4405F" },
+  linkedin: { color: () => "#0A66C2" },
+  youtube: { color: () => "#FF0000" },
+  github: { color: () => theme().text },
+  medium: { color: () => "#00AB6C" },
+  substack: { color: () => "#FF6719" },
+  openai: { color: () => theme().text },
+  perplexity: { color: () => "#1FB8CD" },
+  claude: { color: () => "#D97757" },
+  link: { color: () => theme().stats.views },
+  file: { color: () => theme().stats.visitors },
+};
+
+// A source's icon (icons.ts), centred in a slot as wide as the largest one,
+// so names line up whatever the icon's size.
+function SourceIcon(props: { name: string }) {
+  const style = () => ICON_STYLE[props.name];
   return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" />
-      <path d="M12 7v5l3 3" />
-    </svg>
+    <span class="ref-icon">
+      <svg
+        width={style()?.size ?? 16}
+        height={style()?.size ?? 16}
+        style={{ color: style()?.color() }}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+        innerHTML={ICONS[props.name]}
+      />
+    </span>
   );
 }
 
-// Tabler "percentage" circle, with a slice filled clockwise from the top
-// for `pct` (0-100).
-function PieIcon(props: { pct: number }) {
-  const slice = () => {
-    const p = Math.min(100, Math.max(0, props.pct));
-    if (p <= 0) return null;
-    if (p >= 100) return "M12 3a9 9 0 1 1 0 18a9 9 0 1 1 0 -18";
-    const a = (p / 100) * 2 * Math.PI;
-    const x = 12 + 9 * Math.sin(a);
-    const y = 12 - 9 * Math.cos(a);
-    return `M12 12V3A9 9 0 ${p > 50 ? 1 : 0} 1 ${x.toFixed(3)} ${y.toFixed(3)}Z`;
-  };
+// Tabler "book", stroked in the current text colour.
+function BookIcon() {
   return (
     <svg
-      width="15"
-      height="15"
+      width="18"
+      height="18"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -510,8 +545,11 @@ function PieIcon(props: { pct: number }) {
       stroke-linejoin="round"
       aria-hidden="true"
     >
-      <Show when={slice()}>{(d) => <path d={d()} fill="currentColor" stroke="none" />}</Show>
-      <path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" />
+      <path d="M3 19a9 9 0 0 1 9 0a9 9 0 0 1 9 0" />
+      <path d="M3 6a9 9 0 0 1 9 0a9 9 0 0 1 9 0" />
+      <path d="M3 6l0 13" />
+      <path d="M12 6l0 13" />
+      <path d="M21 6l0 13" />
     </svg>
   );
 }

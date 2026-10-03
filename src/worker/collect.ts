@@ -1,6 +1,7 @@
 import { UAParser } from "ua-parser-js";
 import { COUNT_READ, COUNT_VIEW, COUNT_VISITOR, READ_HIT } from "./counters";
 import { newVisitorId, readVisitor, visitorCookie } from "./session";
+import { canonicalSource } from "../shared/referrers";
 import { configuredSites } from "./sites";
 import { TZ_COUNTRY } from "./tz-country";
 
@@ -64,7 +65,7 @@ export async function handleHit(request: Request, env: Env): Promise<Response> {
     const refHost = ref?.hostname.toLowerCase();
     let source = "";
     if (refHost === host) source = ref!.pathname.slice(0, 1024);
-    else if (refHost) source = refHost.replace(/^www\./, "");
+    else if (refHost) source = canonicalSource(refHost.replace(/^www\./, ""));
     const ua = new UAParser(request.headers.get("user-agent") ?? undefined);
     const visitorId = (await readVisitor(request, env.COOKIE_SECRET)) ?? newVisitorId();
 

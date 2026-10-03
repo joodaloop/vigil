@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { COUNT_READ, COUNT_VIEW, COUNT_VISITOR, READ_HIT } from "../src/worker/counters.ts";
 import { filteredVisitors } from "../src/worker/filtered.ts";
+import { canonicalSource } from "../src/shared/referrers.ts";
 
 const migration = (name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8");
 const init = migration("0001_init.sql");
@@ -315,4 +316,25 @@ test("visitors under a filter match a scan of the hits, through the covering ind
     };
     assert.match(plan("/one", null), /COVERING INDEX hits_page/);
     assert.match(plan(null, "news.example"), /COVERING INDEX hits_source/);
+});
+
+test("the migration records each referring site under the same domain as the collector", () => {
+    const domains = ["google.com", "news.google.com", "t.co", "twitter.com", "mobile.twitter.com", "x.com", "lnkd.in",
+        "linkedin.com", "old.reddit.com", "l.facebook.com", "m.youtube.com", "someone.substack.com", "news.ycombinator.com",
+        "search.brave.com", "mastodon.social", "example.org", "blog.example.net"];
+    const old = new DatabaseSync(":memory:");
+    old.exec(init);
+    old.exec("INSERT INTO strings (id, value) VALUES (1, 'a.test'), (2, 'a.test/')");
+    domains.forEach((d, i) => {
+        old.prepare("INSERT INTO strings (id, value) VALUES (?, ?)").run(10 + i, d);
+        old.prepare(`INSERT INTO hits (id, ts, site, host, page, visitor_id, entry_hit_id, src)
+                     VALUES (?, 86400, 1, 1, 2, 1, ?, ?)`).run(i + 1, i + 1, 10 + i);
+    });
+    old.exec(views);
+    assert.deepEqual(
+        old.prepare("SELECT source FROM hits ORDER BY id").all().map((r) => r.source),
+        domains.map(canonicalSource),
+    );
+    assert.equal(canonicalSource("t.co"), "x.com");
+    assert.equal(canonicalSource("someone.substack.com"), "someone.substack.com");
 });
