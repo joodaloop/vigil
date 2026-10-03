@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, onSettled, Show, untrack } from "solid-js";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
@@ -159,23 +159,25 @@ export function Chart(props: {
         );
     }
 
-    onMount(() => {
+    onSettled(() => {
         const observer = new ResizeObserver(() => plot?.setSize({ width: el.clientWidth, height: height() }));
         observer.observe(el);
-        onCleanup(() => {
+        return () => {
             observer.disconnect();
             plot?.destroy();
-        });
+        };
     });
 
     // Rebuild whenever the data or the set of lines changes.
-    createEffect(build);
+    createEffect(
+        () => [props.days, props.lines, props.maxes, props.bars, props.headroom, props.lineWidth, props.height],
+        () => untrack(build),
+    );
 
     return (
         <div
             ref={box}
-            class="chart"
-            classList={{ hoverable: !!props.onHover }}
+            class={["chart", { hoverable: !!props.onHover }]}
             style={{ height: `${height()}px` }}
             // Touch: a finger down shows its day, dragging sideways moves
             // through days, lifting it (or a scroll taking over) clears it.

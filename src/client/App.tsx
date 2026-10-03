@@ -1,4 +1,5 @@
-import { createMemo, createResource, createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, Errored, For, isPending, latest, Loading, Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import type { HostStats, HostSummaries, HostSummary, Overview, PageRow, Referrer } from "../shared/types";
 import { Chart, type Line } from "./Chart";
 import { DEFAULT_PERIOD, PERIODS, SITES } from "./config";
@@ -9,16 +10,19 @@ import { theme } from "./theme";
 const HOSTS = SITES.flatMap((s) => s.hosts.map((h) => ({ ...h, site: s.site })));
 
 type ChartKind = "line" | "bars";
+// What's fetched. The chart style isn't part of it, so changing that doesn't
+// refetch.
 type Query = {
   host: string;
   days: number;
   ref: string | null; // referrer filter
   page: string | null; // page filter, a path
-  chart: ChartKind;
 };
 
+const initialParams = new URLSearchParams(location.search);
+
 function initialQuery(): Query {
-  const params = new URLSearchParams(location.search);
+  const params = initialParams;
   const n = Number(params.get("days"));
   const host = params.get("host");
   return {
@@ -26,15 +30,14 @@ function initialQuery(): Query {
     days: PERIODS.includes(n) ? n : DEFAULT_PERIOD,
     ref: params.get("ref") || null,
     page: params.get("page") || null,
-    chart: params.get("chart") === "bars" ? "bars" : "line",
   };
 }
 
-function toParams(q: Query) {
+function toParams(q: Query, chart: ChartKind) {
   const params = new URLSearchParams({ host: q.host, days: String(q.days) });
   if (q.ref) params.set("ref", q.ref);
   if (q.page) params.set("page", q.page);
-  if (q.chart !== "line") params.set("chart", q.chart);
+  if (chart !== "line") params.set("chart", chart);
   return params;
 }
 
@@ -100,18 +103,37 @@ function chartLines(
 
 export function App() {
   const [query, setQuery] = createSignal(initialQuery());
-  const [data] = createResource(query, fetchOverview);
+  const [chart, setChart] = createSignal<ChartKind>(
+    initialParams.get("chart") === "bars" ? "bars" : "line",
+  );
+  // The open host's stats, along with the query they answer. While a new
+  // query loads, this (and everything drawn from it) keeps showing the last
+  // one, so the panel's name, filters, numbers and chart all switch together.
+  const view = createMemo(async () => {
+    const q = query();
+    return { q, overview: await fetchOverview(q) };
+  });
   // Only refetched when the period changes.
   const days = createMemo(() => query().days);
-  const [summaries] = createResource(days, fetchSummaries);
+  const summaries = createMemo(() => fetchSummaries(days()));
+  // A new query is on its way: the panel fades a little until it lands.
+  const updating = () => isPending(() => view());
 
   function update(change: Partial<Query>) {
     const next = { ...query(), ...change };
     setQuery(next);
-    history.replaceState(null, "", `?${toParams(next)}`);
+    history.replaceState(null, "", `?${toParams(next, chart())}`);
   }
 
+  function updateChart(kind: ChartKind) {
+    setChart(kind);
+    history.replaceState(null, "", `?${toParams(query(), kind)}`);
+  }
+
+  // Nothing is shown until both the sidebar and the panel have their first
+  // numbers, so they arrive together.
   return (
+    <Loading>
     <main>
       <nav class="sidebar">
         <div class="sidebar-top">
@@ -120,7 +142,7 @@ export function App() {
               normal size, so its native menu isn't oversized. */}
           <div class="days-picker">
             <div class="days-num" aria-hidden="true">
-              {query().days}
+              {latest(() => query().days)}
             </div>
             <div class="days-label" aria-hidden="true">
               days
@@ -128,7 +150,7 @@ export function App() {
             <select
               id="period"
               aria-label="Time period"
-              value={query().days}
+              value={latest(() => query().days)}
               onChange={(e) => update({ days: Number(e.currentTarget.value) })}
             >
               <For each={PERIODS}>{(n) => <option value={n}>{n} days</option>}</For>
@@ -139,8 +161,8 @@ export function App() {
             <For each={["line", "bars"] as const}>
               {(kind) => (
                 <button
-                  aria-pressed={query().chart === kind}
-                  onClick={() => update({ chart: kind })}
+                  aria-pressed={chart() === kind ? "true" : "false"}
+                  onClick={() => updateChart(kind)}
                 >
                   {kind}
                 </button>
@@ -150,16 +172,18 @@ export function App() {
         </div>
 
         {/* One entry per host; the open one is shown in full on the right. */}
+        <Errored fallback={<p class="muted">Couldn't load hosts</p>}>
         <For each={HOSTS}>
           {(h) => {
-            const s = () => summaries.latest?.hosts[h.host];
-            const open = () => query().host === h.host;
-            // Loaded, and nothing in the period.
-            const empty = () => !!summaries.latest && !s()?.totals.views;
+            const s = () => summaries().hosts[h.host];
+            // Marked as soon as it's picked, ahead of its stats.
+            const open = () => latest(() => query().host) === h.host;
+            // Nothing in the period.
+            const empty = () => !s()?.totals.views;
             return (
               <button
                 class="host-item"
-                aria-pressed={open()}
+                aria-pressed={open() ? "true" : "false"}
                 title={h.host}
                 disabled={empty()}
                 onClick={() => open() || update({ host: h.host, ref: null, page: null })}
@@ -173,7 +197,7 @@ export function App() {
                     </span>
                     <span style={{ color: theme.stats.new }}>{num(s()?.totals.new ?? 0)}</span>
                     <Chart
-                      days={summaries.latest?.days ?? []}
+                      days={summaries().days}
                       lines={chartLines(s())}
                       height={20}
                       lineWidth={1.5}
@@ -184,28 +208,30 @@ export function App() {
             );
           }}
         </For>
+        </Errored>
       </nav>
 
-      <section class="panel">
-        <Show when={data.error ?? summaries.error}>
-          {(e) => (
-            <p class="muted error">Couldn't load stats: {String((e() as Error).message ?? e())}</p>
+      <section class={["panel", { updating: updating() }]}>
+        <Errored
+          fallback={(e) => (
+            <p class="muted error">Couldn't load stats: {String((e() as Error)?.message ?? e())}</p>
           )}
-        </Show>
-
-        <Stats
-          bars={query().chart === "bars"}
-          name={HOSTS.find((h) => h.host === query().host)!.name}
-          host={query().host}
-          stats={data.latest?.stats}
-          days={data.latest?.days ?? []}
-          activeRef={query().ref}
-          onSelectRef={(ref) => update({ ref })}
-          activePage={query().page}
-          onSelectPage={(page) => update({ page })}
-        />
+        >
+          <Stats
+            bars={chart() === "bars"}
+            name={HOSTS.find((h) => h.host === view().q.host)!.name}
+            host={view().q.host}
+            stats={view().overview.stats}
+            days={view().overview.days}
+            activeRef={view().q.ref}
+            onSelectRef={(ref) => update({ ref })}
+            activePage={view().q.page}
+            onSelectPage={(page) => update({ page })}
+          />
+        </Errored>
       </section>
     </main>
+    </Loading>
   );
 }
 
@@ -214,27 +240,27 @@ function Stats(props: {
   bars: boolean;
   name: string;
   host: string;
-  stats: HostStats | undefined;
+  stats: HostStats;
   days: number[];
   activeRef: string | null;
   onSelectRef: (ref: string | null) => void;
   activePage: string | null;
   onSelectPage: (page: string | null) => void;
 }) {
-  const t = () => props.stats?.totals;
-  const devices = () => t()?.devices ?? { desktop: 0, tablet: 0, mobile: 0 };
+  const t = () => props.stats.totals;
+  const devices = () => t().devices;
   // One scale for every page's sparkline (across all pages of the list), so
   // their heights compare.
   const pageMax = () => {
     let max = 0;
-    for (const p of props.stats?.pages ?? []) for (const v of p.daily) if (v > max) max = v;
+    for (const p of props.stats.pages) for (const v of p.daily) if (v > max) max = v;
     return { count: max };
   };
   // The day hovered on the chart, whose numbers replace the period's.
   const [day, setDay] = createSignal<number | null>(null);
   const shown = (stat: "views" | "visitors" | "new") => {
     const i = day();
-    return (i === null ? t()?.[stat] : props.stats?.daily[stat][i]) ?? 0;
+    return i === null ? t()[stat] : props.stats.daily[stat][i];
   };
 
   return (
@@ -250,7 +276,7 @@ function Stats(props: {
           </div>
           {/* While a day is hovered: its numbers, and the rest (only known for
               the whole period) hidden. */}
-          <div class="totals" classList={{ "one-day": day() !== null }}>
+          <div class={["totals", { "one-day": day() !== null }]}>
             <div>
               <div style={{ color: theme.stats.views }}>
                 <div class="big">{num(shown("views"))}</div>
@@ -258,11 +284,11 @@ function Stats(props: {
               </div>
               <div class="sub stacked icons">
                 <span title="Average scroll depth">
-                  <PieIcon pct={t()?.avgScrollPct ?? 0} />{" "}
-                  {t()?.avgScrollPct == null ? "–" : `${Math.round(t()!.avgScrollPct!)}%`}
+                  <PieIcon pct={t().avgScrollPct ?? 0} />{" "}
+                  {t().avgScrollPct == null ? "–" : `${Math.round(t().avgScrollPct!)}%`}
                 </span>
                 <span title="Average time on page">
-                  <ClockIcon /> {duration(t()?.avgEngagedS ?? null)}
+                  <ClockIcon /> {duration(t().avgEngagedS)}
                 </span>
               </div>
             </div>
@@ -273,13 +299,13 @@ function Stats(props: {
               </div>
               <div class="sub stacked icons devices">
                 <span title="Desktop">
-                  <DeviceIcon w={14} h={9} /> {pct(devices().desktop, t()?.visitors ?? 0)}%
+                  <DeviceIcon w={14} h={9} /> {pct(devices().desktop, t().visitors)}%
                 </span>
                 <span title="Tablet">
-                  <DeviceIcon w={10} h={12} /> {pct(devices().tablet, t()?.visitors ?? 0)}%
+                  <DeviceIcon w={10} h={12} /> {pct(devices().tablet, t().visitors)}%
                 </span>
                 <span title="Phone">
-                  <DeviceIcon w={7} h={12} /> {pct(devices().mobile, t()?.visitors ?? 0)}%
+                  <DeviceIcon w={7} h={12} /> {pct(devices().mobile, t().visitors)}%
                 </span>
               </div>
             </div>
@@ -289,7 +315,7 @@ function Stats(props: {
                 <div class="big-label">New visitors</div>
               </div>
               <div class="sub bounced" title="New visitors who viewed one page and never came back">
-                <BounceIcon /> {num(t()?.newBounced ?? 0)}
+                <BounceIcon /> {num(t().newBounced)}
               </div>
             </div>
           </div>
@@ -309,7 +335,7 @@ function Stats(props: {
 
       <div class="lists">
         <div class="pages">
-          <Paged items={props.stats?.pages ?? []}>
+          <Paged items={props.stats.pages}>
             {(page) => (
               <PageItem
                 page={page}
@@ -323,7 +349,7 @@ function Stats(props: {
         </div>
 
         <Referrers
-          items={props.stats?.referrers ?? []}
+          items={props.stats.referrers}
           days={props.days}
           active={props.activeRef}
           onSelect={props.onSelectRef}
@@ -363,11 +389,11 @@ function Referrers(props: {
         {(r) => {
           const on = () => props.active === r.domain;
           return (
-            <div class="referrer" classList={{ active: on() }}>
+            <div class={["referrer", { active: on() }]}>
               <button
                 class="ref-name"
                 title={on() ? "Clear filter" : `Only visits from ${r.domain}`}
-                aria-pressed={on()}
+                aria-pressed={on() ? "true" : "false"}
                 onClick={() => props.onSelect(on() ? null : r.domain)}
               >
                 {referrerName(r.domain)}
@@ -416,7 +442,7 @@ function Paged<T>(props: { items: T[]; size?: number; children: (item: T) => JSX
           <For each={Array.from({ length: pages() }, (_, i) => i)}>
             {(i) => (
               <button
-                classList={{ current: i === current() }}
+                class={{ current: i === current() }}
                 aria-label={`Page ${i + 1} of ${pages()}`}
                 aria-current={i === current() ? "page" : undefined}
                 onClick={() => setPage(i)}
@@ -441,10 +467,9 @@ function PageItem(props: {
 }) {
   return (
     <button
-      class="row"
-      classList={{ active: props.active }}
+      class={["row", { active: props.active }]}
       title={props.active ? "Clear filter" : `Only views of ${props.page.path}`}
-      aria-pressed={props.active}
+      aria-pressed={props.active ? "true" : "false"}
       onClick={() => props.onSelect(props.active ? null : props.page.path)}
     >
       {/* "/posts/x/" shows as "posts/x"; the home page stays "/". */}

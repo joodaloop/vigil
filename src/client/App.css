@@ -1,5 +1,5 @@
-/* Colours (--bg, --surface, --text, --muted) come from theme.ts, set in
-   main.tsx. */
+/* Colours (--bg, --surface, --text, --muted, and the stats' --views,
+   --visitors and --new) come from theme.ts, set in main.tsx. */
 
 :root {
   --gutter: 24px; /* side padding on narrow screens */
@@ -131,9 +131,22 @@ main {
 h1 {
   margin: 0 auto 0 0; /* pickers to the right */
   font-size: 2.4rem;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1;
+  /* Split into the three stat colours, left to right. The background only
+     paints inside the box, so it's stretched down past the descenders
+     (and the layout pulled back up). */
+  padding-bottom: 0.25em;
+  margin-bottom: -0.25em;
+  background: linear-gradient(
+    to right,
+    var(--views) 0 33.3%,
+    var(--visitors) 33.3% 66.7%,
+    var(--new) 66.7%
+  );
+  background-clip: text;
+  color: transparent;
 }
 
 /* The select is invisible, covering the number, at normal size so its
@@ -216,10 +229,20 @@ select option {
 /* ---- Panel ---- */
 
 .panel {
-  --pad: 2.5rem; /* side padding, which the big chart bleeds through */
+  --pad: 3rem; /* side padding, which the big chart bleeds through */
   min-width: 0;
   padding: 4rem var(--pad) 5rem;
   background: var(--surface);
+}
+
+/* Waiting on new stats. Delayed, so quick ones don't flicker. */
+.panel > * {
+  transition: opacity 0.15s;
+}
+
+.panel.updating > * {
+  opacity: 0.6;
+  transition-delay: 0.2s;
 }
 
 .error {
