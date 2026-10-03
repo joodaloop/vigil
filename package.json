@@ -1,0 +1,30 @@
+{
+    "name": "vigil",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite dev",
+        "build": "vite build",
+        "preview": "vite preview",
+        "deploy": "vite build && wrangler d1 migrations apply DB --remote && wrangler deploy",
+        "db:migrate": "wrangler d1 migrations apply DB --local",
+        "db:seed": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/seed.ts && wrangler d1 execute DB --local --file .wrangler/seed.sql",
+        "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
+        "types:gen": "wrangler types"
+    },
+    "dependencies": {
+        "solid-js": "^1.9.13",
+        "ua-parser-js": "^1.0.38",
+        "uplot": "^1.6.32"
+    },
+    "devDependencies": {
+        "@cloudflare/vite-plugin": "^1.39.0",
+        "@cloudflare/workers-types": "^4.20250803.0",
+        "@types/ua-parser-js": "^0.7.39",
+        "typescript": "^5.7.2",
+        "vite": "^8.0.14",
+        "vite-plugin-solid": "^2.11.12",
+        "wrangler": "^4.95.0"
+    },
+    "packageManager": "pnpm@11.11.0+sha512.4463f65fd80ed80d69bc1d4bf163ee94f605c7380fc318bb5b2ebe15f8cd12d49c51a4d59e951b401e764d3b6ca751cbf51bc50ed7001a6bcb4935e684c34882"
+}
