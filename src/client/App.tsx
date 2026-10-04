@@ -9,47 +9,49 @@ import {
   Show,
 } from "solid-js";
 import type { JSX } from "@solidjs/web";
-import type { HostStats, HostSummaries, Overview, PageRow, Referrer, Site } from "../shared/types";
+import type { HostStats, HostSummaries, Overview, Site } from "../shared/types";
 import { Chart } from "./Chart";
 import { DEFAULT_PERIOD, PERIODS } from "./config";
 import { ICONS } from "./icons";
 import { referrerIcon, referrerName } from "../shared/referrers";
 import { theme } from "./theme";
 
-// What's shown, and fetched.
+// What's shown, and fetched; kept in the address.
 type Query = {
   host: string;
   days: number;
-  ref: string | null; // referrer filter
-  page: string | null; // page filter, a path
-  country: string | null; // country filter, an ISO code
+} & Filters;
+
+// Each filter's pick, or null for none.
+type Filters = {
+  country: string | null; // an ISO code
+  page: string | null; // a path
+  source: string | null; // a referring site's domain, or a page's path
 };
 
-const initialParams = new URLSearchParams(location.search);
-
 function initialQuery(hosts: Site[]): Query {
-  const params = initialParams;
+  const params = new URLSearchParams(location.search);
   const n = Number(params.get("days"));
   const host = params.get("host");
   return {
     host: hosts.some((h) => h.host === host) ? host! : hosts[0].host,
     days: PERIODS.includes(n) ? n : DEFAULT_PERIOD,
-    ref: null,
-    page: null,
-    country: null,
+    country: params.get("country") || null,
+    page: params.get("page") || null,
+    source: params.get("source") || null,
   };
 }
 
-// Only the host and period go in the address: filters are picked from
-// what's shown, so a link or reload starts without them.
+// The query as the address's and the API's parameters, leaving out filters
+// that aren't set.
 function toParams(q: Query) {
-  return new URLSearchParams({ host: q.host, days: String(q.days) });
+  const params = new URLSearchParams({ host: q.host, days: String(q.days) });
+  for (const k of ["country", "page", "source"] as const) if (q[k] !== null) params.set(k, q[k]);
+  return params;
 }
 
-async function get<T>(path: string, params: Record<string, string | null>): Promise<T> {
-  const search = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) if (v) search.set(k, v);
-  const r = await fetch(`${path}?${search}`);
+async function get<T>(path: string, params: URLSearchParams | Record<string, string>): Promise<T> {
+  const r = await fetch(`${path}?${new URLSearchParams(params)}`);
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
   return r.json();
 }
@@ -63,6 +65,8 @@ const compact = new Intl.NumberFormat("en", {
   roundingPriority: "lessPrecision",
 });
 const num = (n: number) => compact.format(n).replace("K", "k");
+// 2.43 -> "2.4", 3 -> "3".
+const perDevice = new Intl.NumberFormat("en", { maximumFractionDigits: 1 });
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 // A list row's share of its list, for the bar behind it; none under 0.25%.
 const share = (part: number, whole: number) =>
@@ -72,28 +76,26 @@ export function App(props: { sites: Site[] }) {
   // Every site, in display order.
   const HOSTS = props.sites;
   const [query, setQuery] = createSignal(initialQuery(HOSTS));
-  // The open host in full.
-  function fetchOverview(q: Query) {
-    return get<Overview>("/api/overview", {
-      host: q.host,
-      days: String(q.days),
-      ref: q.ref,
-      page: q.page,
-      country: q.country,
-    });
-  }
-
-  // The open host's stats, along with the query they answer. While a new
-  // query loads, this (and everything drawn from it) keeps showing the last
-  // one, so the panel's name, numbers and chart all switch together. (The
-  // picked filters show at once, like the picked host and period, so a
-  // second click acts on the first.)
+  // The open host's unfiltered overview, fetched once per host and period:
+  // it's what's shown without filters, and its lists are the filters'
+  // options.
+  const period = createMemo(() => `${query().host} ${query().days}`);
+  const unfiltered = createMemo(() => {
+    const [host, days] = period().split(" ");
+    return get<Overview>("/api/overview", { host, days });
+  });
+  // The open host's stats (and its unfiltered ones), along with the query
+  // they answer. While a new query loads, this (and everything drawn from
+  // it) keeps showing the last one, so the panel's name, numbers and chart
+  // all switch together.
   const view = createMemo(async () => {
     const q = query();
-    return { q, overview: await fetchOverview(q) };
+    const all = unfiltered();
+    const filtered = q.country !== null || q.page !== null || q.source !== null;
+    return { q, all, overview: filtered ? await get<Overview>("/api/overview", toParams(q)) : all };
   });
-  // Headline numbers for every host, for the sidebar. Never filtered, so only
-  // refetched when the period changes.
+  // Headline numbers for every host, for the sidebar. Only refetched when the
+  // period changes.
   const days = createMemo(() => query().days);
   const summaries = createMemo(() => get<HostSummaries>("/api/hosts", { days: String(days()) }));
   // The sidebar's hosts, most views in the period first (ties keep site order).
@@ -105,10 +107,14 @@ export function App(props: { sites: Site[] }) {
   // A new query is on its way: the panel fades a little until it lands.
   const updating = () => isPending(() => view());
 
+  // From the query as last set, which a read of `query()` doesn't give until
+  // the next flush, so two changes in a row both count.
   function update(change: Partial<Query>) {
-    const next = { ...query(), ...change };
-    setQuery(next);
-    history.replaceState(null, "", `?${toParams(next)}`);
+    setQuery((q) => {
+      const next = { ...q, ...change };
+      history.replaceState(null, "", `?${toParams(next)}`);
+      return next;
+    });
   }
 
   // Nothing is shown until both the sidebar and the panel have their first
@@ -130,11 +136,7 @@ export function App(props: { sites: Site[] }) {
                 id="period"
                 aria-label="Time period"
                 value={latest(() => query().days)}
-                // A new period starts over, without filters (the picked
-                // rows and flag might not be in it).
-                onChange={(e) =>
-                  update({ days: Number(e.currentTarget.value), ref: null, page: null, country: null })
-                }
+                onChange={(e) => update({ days: Number(e.currentTarget.value) })}
               >
                 <For each={PERIODS}>{(n) => <option value={n}>{n} days</option>}</For>
               </select>
@@ -156,9 +158,7 @@ export function App(props: { sites: Site[] }) {
                     aria-pressed={open() ? "true" : "false"}
                     title={h.host}
                     disabled={empty()}
-                    onClick={() =>
-                      open() || update({ host: h.host, ref: null, page: null, country: null })
-                    }
+                    onClick={() => open() || update({ host: h.host })}
                   >
                     <span class="host-name">{h.name}</span>
                     <Show when={!empty()} fallback={<span class="muted">No stats yet</span>}>
@@ -204,16 +204,15 @@ export function App(props: { sites: Site[] }) {
               name={HOSTS.find((h) => h.host === view().q.host)!.name}
               host={view().q.host}
               stats={view().overview.stats}
+              options={view().all.stats}
               days={view().overview.days}
-              // A referrer and a page can't both be filters: picking one
-              // clears the other, and the country too (a country can then be
-              // picked from the flags, which follow it).
-              activeRef={latest(() => query().ref)}
-              onSelectRef={(ref) => update(ref ? { ref, page: null, country: null } : { ref })}
-              activePage={latest(() => query().page)}
-              onSelectPage={(page) => update(page ? { page, ref: null, country: null } : { page })}
-              activeCountry={latest(() => query().country)}
-              onSelectCountry={(country) => update({ country })}
+              // The picks show at once, ahead of their stats.
+              filters={{
+                country: latest(() => query().country),
+                page: latest(() => query().page),
+                source: latest(() => query().source),
+              }}
+              onFilter={update}
             />
           </Errored>
         </section>
@@ -227,38 +226,21 @@ function Stats(props: {
   name: string;
   host: string;
   stats: HostStats;
+  options: HostStats; // unfiltered, for the filters' options
   days: number[];
-  activeRef: string | null;
-  onSelectRef: (ref: string | null) => void;
-  activePage: string | null;
-  onSelectPage: (page: string | null) => void;
-  activeCountry: string | null;
-  onSelectCountry: (country: string | null) => void;
+  filters: Filters;
+  onFilter: (change: Partial<Filters>) => void;
 }) {
   const t = () => props.stats.totals;
-  // One scale for every page's sparkline (across all pages of the list), so
-  // their heights compare.
-  const pageMax = () => {
-    let max = 0;
-    for (const p of props.stats.pages) for (const v of p.daily) if (v > max) max = v;
-    return { count: max };
-  };
-  // Every page's views and new visitors together (the day's while one is
-  // hovered), for each page's shares.
-  const pageTotal = () => {
-    const i = day();
-    return props.stats.pages.reduce((n, p) => n + (i === null ? p.views : p.daily[i]), 0);
-  };
-  const pageNewTotal = () => {
-    const i = day();
-    return props.stats.pages.reduce((n, p) => n + (i === null ? p.new : p.dailyNew[i]), 0);
-  };
-  // The day hovered on the chart, whose numbers replace the period's.
+  // The day hovered on the chart, and the stats as of it, which the totals
+  // and lists show.
   const [day, setDay] = createSignal<number | null>(null);
-  const shown = (stat: "views" | "new" | "reads") => {
-    const i = day();
-    return i === null ? t()[stat] : props.stats.daily[stat][i];
-  };
+  const shown = createMemo(() => onDay(props.stats, day()));
+  const st = () => shown().totals;
+  // What's in the filtered view, which each menu lists first; null without
+  // filters, when that's everything.
+  const within = <T,>(items: T[], key: (item: T) => string) =>
+    props.stats === props.options ? null : new Set(items.map(key));
 
   return (
     <div class="stats">
@@ -270,27 +252,85 @@ function Stats(props: {
             <span class="host-url">
               {day() === null ? props.host : fullDate.format(props.days[day()!] * 1000)}
             </span>
+            {/* Filters by country, page and referrer, in any combination. */}
+            <div class="filters">
+              <FilterSelect
+                label="Country"
+                all="All countries"
+                value={props.filters.country}
+                onChange={(country) => props.onFilter({ country })}
+                others="Other countries"
+                options={props.options.totals.countries.map((c) => ({
+                  value: c.code,
+                  text: countryName.of(c.code) ?? c.code,
+                }))}
+                within={within(t().countries, (c) => c.code)}
+                // A crossed-out flag shape, or once one's picked, its flag.
+                show={(code) =>
+                  code && flag(code) ? (
+                    <img class="filter-flag" src={flag(code)} alt="" />
+                  ) : (
+                    <span class="filter-flag" />
+                  )
+                }
+              />
+              <FilterSelect
+                label="Page"
+                all="All pages"
+                value={props.filters.page}
+                onChange={(page) => props.onFilter({ page })}
+                others="Other pages"
+                options={props.options.pages.map((p) => ({ value: p.path, text: unslashed(p.path) }))}
+                within={within(props.stats.pages, (p) => p.path)}
+                // In the list's monospace.
+                show={(path) => (path ? <span class="path">{path}</span> : "All pages")}
+              />
+              <FilterSelect
+                label="Referrer"
+                all="All referrers"
+                value={props.filters.source}
+                onChange={(source) => props.onFilter({ source })}
+                others="Other referrers"
+                options={props.options.referrers.map((r) => ({
+                  value: r.source,
+                  text: referrerName(r.source),
+                }))}
+                within={within(props.stats.referrers, (r) => r.source)}
+                // Its icon then its name, as in the list.
+                show={(source) =>
+                  source ? (
+                    <span class="ref-name">
+                      <SourceIcon name={referrerIcon(source)} />
+                      {referrerName(source)}
+                    </span>
+                  ) : (
+                    "All referrers"
+                  )
+                }
+              />
+            </div>
           </div>
           {/* While a day is hovered: its numbers. */}
           <div class="totals">
             <div class="total" style={{ color: theme.stats.views }}>
-              <div class="big">{num(shown("views"))}</div>
+              <div class="big">{num(st().views)}</div>
               <div class="big-label">Page views</div>
               {/* Read: visible for long enough (30s unless the tracker's
                   data-read-after says otherwise). */}
               <div class="sub">
                 <span class="count" title="Engaged: views that stayed on screen long enough">
-                  <span class="off-hover">{num(shown("reads"))} engaged</span>
-                  <span class="on-hover">{pct(shown("reads"), shown("views"))}% engaged</span>
+                  <span class="off-hover">{num(st().reads)} engaged</span>
+                  <span class="on-hover">{pct(st().reads, st().views)}% engaged</span>
                 </span>
               </div>
             </div>
             <div class="total" style={{ color: theme.stats.new }}>
-              <div class="big">{num(shown("new"))}</div>
+              <div class="big">{num(st().new)}</div>
               <div class="big-label">New devices</div>
-              {/* Only known for the whole period, so it stays put while a day
-                  is hovered. */}
-              <div class="sub">
+              {/* Only known for the whole period, so hidden while a day is
+                  hovered (hidden rather than removed, so the totals keep
+                  their height). */}
+              <div class="sub" style={{ visibility: day() === null ? undefined : "hidden" }}>
                 <span
                   class="count"
                   title={`Bounced: ${num(t().newBounced)} devices that opened one page and never came back`}
@@ -323,45 +363,110 @@ function Stats(props: {
       </div>
 
       <div class="lists">
-        {/* While a page is the filter, the list stays as it was when it was
-            picked, without its numbers. */}
-        <div class={["pages", { filtered: props.activePage !== null }]}>
-          <Paged
-            items={byDay(props.stats.pages, day(), (p) => p.views)}
-            frozen={props.activePage !== null}
-            key={(p) => p.path}
-          >
-            {(page) => (
-              <PageItem
-                page={page()}
-                days={props.days}
-                day={day()}
-                total={pageTotal()}
-                newTotal={pageNewTotal()}
-                max={pageMax()}
-                active={props.activePage === page().path}
-                onSelect={props.onSelectPage}
-              />
-            )}
-          </Paged>
-        </div>
-
-        <Referrers
-          items={props.stats.referrers}
+        {/* Pages by views. */}
+        <List
+          class="pages"
+          items={shown().pages}
+          key={(p) => p.path}
+          views={(p) => p.views}
           days={props.days}
-          day={day()}
-          active={props.activeRef}
-          onSelect={props.onSelectRef}
+          label={(p) => (
+            // "/posts/x/" shows as "posts/x"; the home page stays "/".
+            <a
+              class="label path"
+              href={`https://${props.host}${p.path}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={p.path}
+            >
+              {p.path.replace(/^\/+|\/+$/g, "") || "/"}
+            </a>
+          )}
+        />
+        {/* Referrers by new visitors, then views. */}
+        <List
+          class="referrers"
+          byNew
+          items={shown().referrers}
+          key={(r) => r.source}
+          views={(r) => r.visits}
+          days={props.days}
+          label={(r) => (
+            <a
+              class="ref-name"
+              href={sourceUrl(r.source, props.host)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={r.source}
+            >
+              <SourceIcon name={referrerIcon(r.source)} />
+              <span class="label">{referrerName(r.source)}</span>
+            </a>
+          )}
         />
       </div>
 
-      <People
-        stats={props.stats}
-        days={props.days}
-        activeCountry={props.activeCountry}
-        onSelectCountry={props.onSelectCountry}
-      />
+      <People stats={props.stats} days={props.days} />
     </div>
+  );
+}
+
+// A path without its leading slash, so the page menu's typing jumps by its
+// first letter; the home page stays "/".
+const unslashed = (path: string) => path.replace(/^\/+/, "") || "/";
+
+// A filter's menu: the picked option's text (or what `show` draws for its
+// value, "" for none), with the select invisible over it (as in the days
+// picker). Options in the filtered view (`within`) come first, then the rest
+// after a blank line and a disabled `others` heading, each alphabetically. A
+// pick missing from `options` (not in the period's) is still listed, so it
+// can be seen and cleared.
+function FilterSelect(props: {
+  label: string;
+  all: string; // the option for no filter
+  others: string;
+  options: { value: string; text: string }[];
+  within: Set<string> | null; // null: no filters, so everything is
+  value: string | null;
+  onChange: (value: string | null) => void;
+  show?: (value: string) => JSX.Element;
+}) {
+  const options = () =>
+    (props.value === null || props.options.some((o) => o.value === props.value)
+      ? [...props.options]
+      : [{ value: props.value, text: props.value }, ...props.options]
+    ).sort((a, b) => a.text.localeCompare(b.text));
+  const isWithin = (o: { value: string }) =>
+    !props.within || props.within.has(o.value) || o.value === props.value;
+  const first = () => options().filter(isWithin);
+  const rest = () => options().filter((o) => !isWithin(o));
+  const text = () => options().find((o) => o.value === props.value)?.text ?? props.all;
+  // Each option says whether it's picked: the select's own value would be
+  // set before its options are there, and fall back to the first.
+  const option = (o: { value: string; text: string }) => (
+    <option value={o.value} selected={o.value === props.value}>
+      {o.text}
+    </option>
+  );
+  return (
+    <span class="filter-select">
+      <span aria-hidden="true">{props.show ? props.show(props.value ?? "") : text()}</span>
+      <select
+        aria-label={props.label}
+        onChange={(e) => props.onChange(e.currentTarget.value || null)}
+      >
+        <option value="" selected={props.value === null}>
+          {props.all}
+        </option>
+        <For each={first()}>{option}</For>
+        <Show when={rest().length > 0}>
+          {/* A blank line, then the heading. */}
+          <option disabled />
+          <option disabled>{props.others}</option>
+          <For each={rest()}>{option}</For>
+        </Show>
+      </select>
+    </span>
   );
 }
 
@@ -373,105 +478,108 @@ const fullDate = new Intl.DateTimeFormat("en", {
   timeZone: "UTC",
 });
 
-// Referrers by new visitors, then views. Clicking one filters everything to
-// visits from it (or clears the filter). While a day is hovered on the main
-// chart (`day`), the list is ranked the same way by that day (ties by the
-// period) and each row shows that day's counts instead of the period's.
-function Referrers(props: {
-  items: Referrer[];
+// The stats as of a day hovered on the main chart (`day`), or the period's:
+// the totals and every row's numbers that day, the rows ranked by them as
+// they are for the period (ties keep the period's order). What's only known
+// for the whole period stays as it is.
+function onDay(stats: HostStats, day: number | null): HostStats {
+  if (day === null) return stats;
+  const { daily } = stats;
+  return {
+    ...stats,
+    totals: {
+      ...stats.totals,
+      views: daily.views[day],
+      reads: daily.reads[day],
+      new: daily.new[day],
+    },
+    pages: stats.pages
+      .map((p) => ({ ...p, views: p.daily[day], new: p.dailyNew[day] }))
+      .sort((a, b) => b.views - a.views),
+    referrers: stats.referrers
+      .map((r) => ({ ...r, visits: r.daily[day], new: r.dailyNew[day] }))
+      .sort((a, b) => b.new - a.new || b.visits - a.visits),
+  };
+}
+
+// Pages or referrers, as they come: each row its label (`label`), a
+// sparkline of its daily views, its views and its new visitors, over a bar
+// as long as its share of the list's views, or with `byNew`, of its new
+// visitors.
+function List<T extends { new: number; daily: number[] }>(props: {
+  class: string;
+  items: T[];
+  key: (item: T) => string;
+  views: (item: T) => number;
+  byNew?: boolean;
+  label: (item: T) => JSX.Element;
   days: number[];
-  day: number | null;
-  active: string | null;
-  onSelect: (ref: string | null) => void;
 }) {
+  const viewsTotal = () => props.items.reduce((n, x) => n + props.views(x), 0);
+  const newTotal = () => props.items.reduce((n, x) => n + x.new, 0);
   // One scale for every sparkline (across all pages of the list), so their
   // heights compare.
   const max = () => {
     let max = 0;
-    for (const r of props.items) for (const v of r.daily) if (v > max) max = v;
+    for (const x of props.items) for (const v of x.daily) if (v > max) max = v;
     return { count: max };
   };
-  // A referrer's views and new visitors (the day's while one is hovered),
-  // and every referrer's of each together, for its shares.
-  const views = (r: Referrer) => (props.day === null ? r.visits : r.daily[props.day]);
-  const fresh = (r: Referrer) => (props.day === null ? r.new : r.dailyNew[props.day]);
-  const total = () => props.items.reduce((n, r) => n + fresh(r), 0);
-  const viewsTotal = () => props.items.reduce((n, r) => n + views(r), 0);
-
   return (
-    // While a referrer is the filter, the list stays as it was when it was
-    // picked, without its numbers.
-    <div class={["referrers", { filtered: props.active !== null }]}>
-      <Paged
-        items={byNewOnDay(props.items, props.day)}
-        frozen={props.active !== null}
-        key={(r) => r.domain}
-      >
-        {(r) => {
-          const on = () => props.active === r().domain;
-          return (
-            <button
-              class={["referrer", { active: on() }]}
-              style={{ "--share": share(fresh(r()), total()) }}
-              title={on() ? "Clear filter" : `Only views that came from ${r().domain}`}
-              aria-pressed={on() ? "true" : "false"}
-              onClick={() => props.onSelect(on() ? null : r().domain)}
-            >
-              <span class="ref-name">
-                <SourceIcon name={referrerIcon(r().domain)} />
-                <span class="ref-label">{referrerName(r().domain)}</span>
-              </span>
-              {/* A sparkline of its daily views, then its views and new visitors. */}
-              <span class="ref-count" style={{ color: theme.stats.views }}>
-                <span class="ref-spark" aria-hidden="true">
-                  <Chart
-                    days={props.days}
-                    lines={[{ values: r().daily, color: theme.stats.views, scale: "count" }]}
-                    maxes={max()}
-                    height={16}
-                    lineWidth={1.25}
-                  />
-                </span>
-                <span class="ref-num">
-                  <Count n={views(r())} total={viewsTotal()} />
-                </span>
-                <span class="ref-num" style={{ color: theme.stats.new }}>
-                  <Count n={fresh(r())} total={total()} blankZero />
-                </span>
-              </span>
-            </button>
-          );
-        }}
+    <div class={props.class}>
+      <Paged items={props.items} key={props.key}>
+        {(x) => (
+          <div
+            class={["row", { "by-new": props.byNew }]}
+            style={{
+              "--share": props.byNew
+                ? share(x().new, newTotal())
+                : share(props.views(x()), viewsTotal()),
+            }}
+          >
+            {props.label(x())}
+            <span class="spark" aria-hidden="true">
+              <Chart
+                days={props.days}
+                lines={[{ values: x().daily, color: theme.stats.views, scale: "count" }]}
+                maxes={max()}
+                height={22}
+                lineWidth={1.25}
+              />
+            </span>
+            <span class="num" style={{ color: theme.stats.views }}>
+              <Count n={props.views(x())} total={viewsTotal()} />
+            </span>
+            <span class="num" style={{ color: theme.stats.new }}>
+              <Count n={x().new} total={newTotal()} blankZero />
+            </span>
+          </div>
+        )}
       </Paged>
     </div>
   );
 }
 
+// A source's address: a page on the site itself, or the referring site's
+// home page.
+const sourceUrl = (source: string, host: string) =>
+  source.startsWith("/") ? `https://${host}${source}` : `https://${source}`;
+
 // Shows `items` 10 at a time, with a row of page dots when there are more.
 // The list keeps a full page's height, dots included, however few items
-// there are.
-// Rows are matched by `key`, so one stays the same element (and keeps
-// focus) as its data changes.
-// A page is picked for one order of the rows, matched by `key`: once they
-// come in another (a day hovered, a filter, period or site picked), it's
-// back to the first page.
-// `frozen` holds the list as it was last shown, rows, data and page, e.g.
-// while one of its rows is the filter, so new data can't change it.
+// there are. Rows are matched by `key`, so one stays the same element as its
+// data changes. Whenever the rows come in another order (a day hovered,
+// another site or period), it's back to the first page.
 // The page buttons are one tab stop, the current page's: arrow keys, Home
 // and End move between pages from there.
 function Paged<T>(props: {
   items: T[];
   size?: number;
-  frozen?: boolean;
   key: (item: T) => string;
   children: (item: () => T) => JSX.Element;
 }) {
   const size = () => props.size ?? 10;
-  // The rows last shown unfrozen, which freezing keeps.
-  let last: T[] = [];
-  const items = createMemo(() => (props.frozen ? last : (last = props.items)));
-  const order = createMemo(() => items().map(props.key).join("\n"));
-  const pages = () => Math.max(1, Math.ceil(items().length / size()));
+  const pages = () => Math.max(1, Math.ceil(props.items.length / size()));
+  const order = createMemo(() => props.items.map(props.key).join("\n"));
   // The page picked, and for which order of the rows.
   const [picked, setPicked] = createSignal({ order: "", page: 0 });
   const current = () => (picked().order === order() ? picked().page : 0);
@@ -496,7 +604,7 @@ function Paged<T>(props: {
   return (
     <>
       <div class="paged" style={{ "--rows": size() }}>
-        <For each={items().slice(start(), start() + size())} keyed={props.key}>
+        <For each={props.items.slice(start(), start() + size())} keyed={props.key}>
           {(item) => props.children(item)}
         </For>
       </div>
@@ -519,59 +627,6 @@ function Paged<T>(props: {
   );
 }
 
-// A page with a sparkline of its daily views, its views and its new visitors.
-// Clicking it filters everything else to that page (or clears the filter).
-function PageItem(props: {
-  page: PageRow;
-  days: number[];
-  day: number | null; // hovered on the main chart: show that day's numbers
-  total: number; // every page's views, for this one's share
-  newTotal: number; // every page's new visitors, for this one's share of them
-  max: Record<string, number>;
-  active: boolean;
-  onSelect: (page: string | null) => void;
-}) {
-  return (
-    <button
-      class={["row", { active: props.active }]}
-      style={{
-        "--share": share(
-          props.day === null ? props.page.views : props.page.daily[props.day],
-          props.total,
-        ),
-      }}
-      title={props.active ? "Clear filter" : `Only views of ${props.page.path}`}
-      aria-pressed={props.active ? "true" : "false"}
-      onClick={() => props.onSelect(props.active ? null : props.page.path)}
-    >
-      {/* "/posts/x/" shows as "posts/x"; the home page stays "/". */}
-      <span class="label path">{props.page.path.replace(/^\/+|\/+$/g, "") || "/"}</span>
-      <span class="page-spark" aria-hidden="true">
-        <Chart
-          days={props.days}
-          lines={[{ values: props.page.daily, color: theme.stats.views, scale: "count" }]}
-          maxes={props.max}
-          height={16}
-          lineWidth={1.25}
-        />
-      </span>
-      <span class="num" style={{ color: theme.stats.views }}>
-        <Count
-          n={props.day === null ? props.page.views : props.page.daily[props.day]}
-          total={props.total}
-        />
-      </span>
-      <span class="num" style={{ color: theme.stats.new }}>
-        <Count
-          n={props.day === null ? props.page.new : props.page.dailyNew[props.day]}
-          total={props.newTotal}
-          blankZero
-        />
-      </span>
-    </button>
-  );
-}
-
 // A list's number, with its share of the list's total in the same place,
 // shown instead while the list is hovered. `blankZero` leaves both empty
 // for none.
@@ -586,26 +641,10 @@ function Count(props: { n: number; total: number; blankZero?: boolean }) {
   );
 }
 
-// A list's rows as they arrive (busiest over the period first), or with a day
-// hovered, busiest that day first (ties by the period).
-function byDay<T extends { daily: number[] }>(
-  items: T[],
-  day: number | null,
-  total: (item: T) => number,
-): T[] {
-  if (day === null) return items;
-  return [...items].sort((a, b) => b.daily[day] - a.daily[day] || total(b) - total(a));
-}
-
 // Visitors: their number and devices on one side and the countries they came
 // from on the other, then their chart across the panel. Nothing here responds
 // to hovering, on either chart.
-function People(props: {
-  stats: HostStats;
-  days: number[];
-  activeCountry: string | null;
-  onSelectCountry: (country: string | null) => void;
-}) {
+function People(props: { stats: HostStats; days: number[] }) {
   const t = () => props.stats.totals;
   const devices = () => t().devices;
 
@@ -617,6 +656,11 @@ function People(props: {
             <div class="total" style={{ color: theme.stats.visitors }}>
               <div class="big">{num(t().visitors)}</div>
               <div class="big-label">Devices</div>
+              <div class="sub">
+                <span title="Page views per device">
+                  {perDevice.format(t().visitors > 0 ? t().views / t().visitors : 0)} pages
+                </span>
+              </div>
             </div>
             {/* Each column most common first. */}
             <div class="sub stacked icons devices">
@@ -642,11 +686,7 @@ function People(props: {
             </div>
           </div>
         </div>
-        <Countries
-          countries={t().countries}
-          active={props.activeCountry}
-          onSelect={props.onSelectCountry}
-        />
+        <Countries items={t().countries} />
       </div>
       <Chart
         days={props.days}
@@ -675,19 +715,6 @@ function Share(props: { part: number; whole: number }) {
   );
 }
 
-// Referrers as they arrive, or with a day hovered, by that day's new
-// visitors, then its views, then the period's order.
-function byNewOnDay(items: Referrer[], day: number | null): Referrer[] {
-  if (day === null) return items;
-  return [...items].sort(
-    (a, b) =>
-      b.dailyNew[day] - a.dailyNew[day] ||
-      b.daily[day] - a.daily[day] ||
-      b.new - a.new ||
-      b.visits - a.visits,
-  );
-}
-
 // Each country's flag (flag-icons, MIT), by ISO code: separate files, so
 // only the ones shown are fetched.
 const FLAGS = import.meta.glob<string>("../../node_modules/flag-icons/flags/4x3/*.svg", {
@@ -699,44 +726,25 @@ const flag = (code: string) =>
   FLAGS[`../../node_modules/flag-icons/flags/4x3/${code.toLowerCase()}.svg`];
 const countryName = new Intl.DisplayNames(["en"], { type: "region" });
 
-// A row of flags for the countries visitors came from, each with an area
-// proportional to its visitors relative to the top one (at least 8px tall). Clicking one filters everything else to
-// that country (or clears the filter); the picked one stays listed.
-function Countries(props: {
-  countries: { code: string; visitors: number }[];
-  active: string | null;
-  onSelect: (country: string | null) => void;
-}) {
-  const shown = () => {
-    const known = props.countries.filter((c) => flag(c.code));
-    const top = known.slice(0, 16);
-    const picked = known.find((c) => c.code === props.active);
-    return picked && !top.includes(picked) ? [...top, picked] : top;
-  };
-  const total = () => props.countries.reduce((n, c) => n + c.visitors, 0);
+// A row of flags for the countries visitors came from (the top 16), each with
+// an area proportional to its visitors relative to the top one (at least 8px
+// tall), and its name and numbers on hover.
+function Countries(props: { items: { code: string; visitors: number }[] }) {
+  const shown = () => props.items.filter((c) => flag(c.code)).slice(0, 16);
+  const total = () => props.items.reduce((n, c) => n + c.visitors, 0);
   return (
     <div class="countries">
       <For each={shown()}>
         {(c) => {
-          const on = () => props.active === c.code;
           const name = () => countryName.of(c.code) ?? c.code;
           return (
-            <button
-              class={{ active: on() }}
-              aria-pressed={on() ? "true" : "false"}
-              title={
-                on()
-                  ? "Clear filter"
-                  : `${name()}: ${num(c.visitors)} visitors (${pct(c.visitors, total())}%)`
-              }
-              onClick={() => props.onSelect(on() ? null : c.code)}
-            >
+            <span title={`${name()}: ${num(c.visitors)} visitors (${pct(c.visitors, total())}%)`}>
               <img
                 src={flag(c.code)}
                 alt={name()}
                 height={Math.max(8, Math.round(40 * Math.sqrt(c.visitors / shown()[0].visitors)))}
               />
-            </button>
+            </span>
           );
         }}
       </For>
@@ -846,7 +854,6 @@ function DeviceIcon(props: { w: number; h: number }) {
         y="1"
         width={props.w}
         height={props.h}
-        rx="2"
         fill="none"
         stroke="currentColor"
         stroke-width="1.5"

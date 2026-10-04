@@ -37,26 +37,23 @@ export function filteredVisitors(host: string, firstDay: number, filters: Filter
 }
 
 // The chart, totals and lists under a country filter, as the `views` queries
-// give them otherwise: the chart and totals take every filter, the pages list
-// ignores the page filter, and the sources list ignores the source filter.
+// give them otherwise, every one taking every filter.
 export function countrySums(host: string, firstDay: number, filters: Filters & { country: string }) {
-    const chart = scope(host, firstDay, filters);
-    const pages = scope(host, firstDay, { ...filters, page: null });
-    const sources = scope(host, firstDay, { ...filters, source: null });
+    const { params, HITS } = scope(host, firstDay, filters);
     return {
         daily: {
-            params: chart.params,
+            params,
             sql: `SELECT ts / 86400 AS day, COUNT(*) AS views, SUM(is_new) AS new, SUM(read) AS reads
-                  ${chart.HITS} GROUP BY day`,
+                  ${HITS} GROUP BY day`,
         },
         pages: {
-            params: pages.params,
-            sql: `SELECT page, ts / 86400 AS day, COUNT(*) AS views, SUM(is_new) AS new ${pages.HITS} GROUP BY page, day`,
+            params,
+            sql: `SELECT page, ts / 86400 AS day, COUNT(*) AS views, SUM(is_new) AS new ${HITS} GROUP BY page, day`,
         },
         sources: {
-            params: sources.params,
+            params,
             sql: `SELECT source, ts / 86400 AS day, COUNT(*) AS views, SUM(is_new) AS new
-                  ${sources.HITS} AND source != '' GROUP BY source, day`,
+                  ${HITS} AND source != '' GROUP BY source, day`,
         },
     };
 }

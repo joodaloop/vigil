@@ -64,13 +64,13 @@ function known(domain: string) {
 
 // A source is a referring site's domain, or for a click within the site, the
 // path of the page it came from, shown as in the pages list ("posts/x").
-export function referrerName(domain: string): string {
-    if (domain.startsWith("/")) return domain.replace(/^\/+|\/+$/g, "") || "/";
-    return known(domain)?.name ?? domain;
+export function referrerName(source: string): string {
+    if (source.startsWith("/")) return source.replace(/^\/+|\/+$/g, "") || "/";
+    return known(source)?.name ?? source;
 }
 
 // The icons.ts key to show beside a source.
-export function referrerIcon(domain: string): string {
-    if (domain.startsWith("/")) return "file";
-    return known(domain)?.icon ?? "link";
+export function referrerIcon(source: string): string {
+    if (source.startsWith("/")) return "file";
+    return known(source)?.icon ?? "link";
 }

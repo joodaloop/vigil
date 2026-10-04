@@ -9,7 +9,7 @@ import { configuredSites } from "./sites";
 //   unfiltered, for the sidebar.
 //
 // Both cover the last `days` UTC days (today included). The overview takes
-// optional `ref` (source), `page` (path) and `country` (ISO code) filters.
+// optional `source`, `page` (path) and `country` (ISO code) filters.
 //
 // Every number is a SUM over `views` (schema.sql), except
 // unique visitors: unfiltered, a count of `visitors`; under a filter, a count
@@ -50,62 +50,51 @@ function emptyHost(n: number): HostStats {
 }
 
 async function overview(env: Env, host: string, numDays: number, filters: Filters): Promise<Overview> {
-    const { page, source: ref, country } = filters;
+    const { page, source, country } = filters;
     const { firstDay, days } = period(numDays);
-    const result: Overview = { days, ref, page, country, stats: emptyHost(numDays) };
+    const result: Overview = { days, stats: emptyHost(numDays) };
     // The sums are grouped in SQL, so the Worker gets back a few hundred
-    // rows rather than every (day, page, source) one. Each list ignores its
-    // own filter, so every option stays listed while one is picked.
-    const q = (sql: string, onPage: boolean, onRef: boolean) => {
+    // rows rather than every (day, page, source) one. Every number, lists
+    // included, takes every filter: the dashboard lists the options from the
+    // unfiltered overview, which it already has.
+    const q = (sql: string) => {
         const where = ["host = ?", "day >= ?"];
         const params: unknown[] = [host, firstDay];
-        if (onPage && page) where.push("page = ?"), params.push(page);
-        if (onRef && ref) where.push("source = ?"), params.push(ref);
+        if (page) where.push("page = ?"), params.push(page);
+        if (source) where.push("source = ?"), params.push(source);
         return env.DB.prepare(sql.replace("$WHERE", where.join(" AND "))).bind(...params);
     };
     // The same three, from a country's hits.
-    const inCountry = country ? countrySums(host, firstDay, { page, source: ref, country }) : null;
+    const inCountry = country ? countrySums(host, firstDay, { page, source, country }) : null;
     const h = (part: { sql: string; params: unknown[] }) => env.DB.prepare(part.sql).bind(...part.params);
-    // Visitors in the period, by device, country and OS, under `f`. Unfiltered:
-    // everyone whose latest visit is in it, since the period ends today, read
-    // from the covering index; filtered, from the filter's hits.
-    const people = (f: Filters) => {
-        if (f.page || f.source || f.country) {
-            const u = filteredVisitors(host, firstDay, f);
-            return env.DB.prepare(u.people).bind(...u.params);
-        }
-        return env.DB.prepare(
-            `SELECT device, country, os, COUNT(*) AS visitors, SUM(first_ts >= ?2 AND first_ts = last_ts) AS bounced
-             FROM visitors WHERE host = ?1 AND last_ts >= ?2 GROUP BY device, country, os`,
-        ).bind(host, firstDay * 86400);
-    };
-
-    const filtered = page || ref || country;
+    const filtered = page || source || country;
     const byFilter = filtered ? filteredVisitors(host, firstDay, filters) : null;
-    const [daily, pages, sources, everyone, filteredDaily, byCountry] = (await env.DB.batch([
+    const [daily, pages, sources, everyone, filteredDaily] = (await env.DB.batch([
         inCountry
             ? h(inCountry.daily)
             : q(
                   `SELECT day, SUM(views) AS views, SUM(visitors) AS visitors, SUM(new) AS new, SUM(reads) AS reads
                    FROM views WHERE $WHERE GROUP BY day`,
-                  true,
-                  true,
               ),
         inCountry
             ? h(inCountry.pages)
-            : q(`SELECT page, day, SUM(views) AS views, SUM(new) AS new FROM views WHERE $WHERE GROUP BY page, day`, false, true),
+            : q(`SELECT page, day, SUM(views) AS views, SUM(new) AS new FROM views WHERE $WHERE GROUP BY page, day`),
         // Where views came from: another site, or on a click within the site,
-        // the previous page. With a page filter, where that page's readers
-        // came from.
+        // the previous page.
         inCountry
             ? h(inCountry.sources)
-            : q(`SELECT source, day, SUM(views) AS views, SUM(new) AS new FROM views WHERE $WHERE AND source != '' GROUP BY source, day`, true, false),
-        people(filters),
+            : q(`SELECT source, day, SUM(views) AS views, SUM(new) AS new FROM views WHERE $WHERE AND source != '' GROUP BY source, day`),
+        // Visitors in the period, by device, country and OS. Unfiltered:
+        // everyone whose latest visit is in it, since the period ends today,
+        // read from the covering index; filtered, from the filter's hits.
+        byFilter
+            ? env.DB.prepare(byFilter.people).bind(...byFilter.params)
+            : env.DB.prepare(
+                  `SELECT device, country, os, COUNT(*) AS visitors, SUM(first_ts >= ?2 AND first_ts = last_ts) AS bounced
+                   FROM visitors WHERE host = ?1 AND last_ts >= ?2 GROUP BY device, country, os`,
+              ).bind(host, firstDay * 86400),
         // Filtered, visitors per day; unfiltered, they're summed from `views`.
         byFilter ? env.DB.prepare(byFilter.daily).bind(...byFilter.params) : null,
-        // The countries' flags ignore the country filter, so with one picked
-        // they need their own count.
-        country ? people({ page, source: ref, country: null }) : null,
     ].filter((s) => s !== null))) as [
         D1Result<DailyRow>,
         D1Result<PageDayRow>,
@@ -114,7 +103,6 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
         ...D1Result[],
     ];
     const visitorsByDay = filteredDaily as D1Result<{ day: number; visitors: number }> | undefined;
-    const flagsFrom = (country ? byCountry : everyone) as D1Result<PeopleRow>;
 
     const stats = result.stats;
     const t = stats.totals;
@@ -149,7 +137,7 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
     const bySource = new Map<string, Referrer>();
     for (const r of sources.results) {
         let s = bySource.get(r.source);
-        if (!s) bySource.set(r.source, (s = { domain: r.source, visits: 0, new: 0, daily: Array(numDays).fill(0), dailyNew: Array(numDays).fill(0) }));
+        if (!s) bySource.set(r.source, (s = { source: r.source, visits: 0, new: 0, daily: Array(numDays).fill(0), dailyNew: Array(numDays).fill(0) }));
         s.visits += r.views;
         s.new += r.new;
         s.daily[r.day - firstDay] = r.views;
@@ -170,7 +158,7 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
         if (r.os) t.systems.known += r.visitors;
     }
     const countries = new Map<string, number>();
-    for (const r of flagsFrom.results) {
+    for (const r of everyone.results) {
         if (r.country) countries.set(r.country, (countries.get(r.country) ?? 0) + r.visitors);
     }
     t.countries = [...countries].map(([code, visitors]) => ({ code, visitors })).sort((a, b) => b.visitors - a.visitors);
@@ -232,7 +220,7 @@ export async function handleApi(url: URL, env: Env): Promise<Response> {
         const host = (url.searchParams.get("host") ?? "").toLowerCase();
         const filters = {
             page: url.searchParams.get("page") || null,
-            source: url.searchParams.get("ref") || null,
+            source: url.searchParams.get("source") || null,
             country: url.searchParams.get("country") || null,
         };
         return json(await overview(env, host, days, filters));

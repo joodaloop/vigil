@@ -31,8 +31,8 @@ export type PageRow = {
 export type HostStats = {
     totals: HostTotals;
     daily: HostDaily;
-    referrers: Referrer[]; // where views came from, by new visitors then views; page filter only
-    pages: PageRow[]; // by views; referrer filter only
+    referrers: Referrer[]; // where views came from, by new visitors then views
+    pages: PageRow[]; // by views
 };
 
 // The headline numbers for one host, for the sidebar: views (with a daily
@@ -43,7 +43,7 @@ export type HostSummary = {
 };
 
 export type Referrer = {
-    domain: string; // a referring site, or "/path" of a page on this one
+    source: string; // a referring site's domain, or "/path" of a page on this one
     visits: number; // views that came from this source
     new: number; // visitors whose first view came from it
     daily: number[];
@@ -53,9 +53,6 @@ export type Referrer = {
 // GET /api/overview: everything for one host.
 export type Overview = {
     days: number[]; // unix seconds at the start of each UTC day
-    ref: string | null; // active referrer filter
-    page: string | null; // active page filter (a path)
-    country: string | null; // active country filter (an ISO code)
     stats: HostStats;
 };
 
