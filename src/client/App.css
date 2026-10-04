@@ -476,12 +476,12 @@ select option {
   inset: 0 auto 0 calc(var(--row-x) - var(--out));
   z-index: -1;
   width: calc((100% - var(--row-x) - var(--tail) + var(--out)) * var(--share, 0));
-  background: color-mix(in srgb, var(--views) 20%, transparent);
+  background: color-mix(in srgb, var(--views) 10%%, transparent);
 }
 
 /* Referrers are ranked by new visitors, so theirs are in its red. */
 .referrer::before {
-  background: color-mix(in srgb, var(--new) 20%, transparent);
+  background: color-mix(in srgb, var(--new) 10%%, transparent);
 }
 
 .path {
