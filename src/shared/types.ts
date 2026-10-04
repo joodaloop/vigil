@@ -17,6 +17,7 @@ export type HostDaily = {
     views: number[];
     visitors: number[];
     new: number[];
+    reads: number[];
 };
 
 export type PageRow = {

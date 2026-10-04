@@ -43,7 +43,7 @@ function emptyHost(n: number): HostStats {
             new: 0,
             newBounced: 0,
         },
-        daily: { views: Array(n).fill(0), visitors: Array(n).fill(0), new: Array(n).fill(0) },
+        daily: { views: Array(n).fill(0), visitors: Array(n).fill(0), new: Array(n).fill(0), reads: Array(n).fill(0) },
         referrers: [],
         pages: [],
     };
@@ -123,6 +123,7 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
         const i = r.day - firstDay;
         stats.daily.views[i] = r.views;
         stats.daily.new[i] = r.new;
+        stats.daily.reads[i] = r.reads;
         // Filtered, these are replaced below: summed from `views` they'd count
         // readers on the page of their first hit of the day.
         stats.daily.visitors[i] = byFilter ? 0 : r.visitors;

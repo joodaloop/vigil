@@ -25,9 +25,9 @@ fed by a tracker that only counts a page view once the reader scrolls.
   within the site, the previous page. Pick a page on the dashboard to see where
   its readers came from; pick one of your pages as a source to see where its
   readers went next.
-- Each hit also adds to a few per-day counts, so the dashboard sums those
-  rather than reading hits. Unique visitors can't be summed, so they're only
-  shown without a page or referrer filter.
+- Each hit also adds to per-day counts by page and source, so the dashboard
+  mostly sums those rather than reading hits. Unique visitors under a filter,
+  and everything under a country filter, are counted from the matching hits.
 - Country comes from the browser's timezone. No IPs are read or stored.
 
 ## Adding a site (Netlify)

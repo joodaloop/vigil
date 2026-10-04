@@ -117,7 +117,7 @@ main {
   flex-direction: column;
   gap: 0.5rem;
   min-width: 0;
-  padding: 4rem 1.75rem 3rem;
+  padding: 3.2rem 1.75rem 3rem;
 }
 
 /* Name on the left, period on the right. */
@@ -223,7 +223,7 @@ select option {
 .panel {
   --pad: 3rem; /* side padding, which the big chart bleeds through */
   min-width: 0;
-  padding: 4rem var(--pad) 5rem;
+  padding: 3.2rem var(--pad) 5rem;
   background: var(--surface);
 }
 
@@ -277,7 +277,6 @@ select option {
   justify-content: space-between;
   align-items: flex-start;
   gap: 4rem;
-  margin-bottom: 0.25rem;
 }
 
 /* The visitors number, with its devices beside it rather than under it. */
@@ -346,6 +345,34 @@ h2 {
 .totals {
   display: flex;
   gap: 2.5rem;
+}
+
+/* Fixed width, left-aligned, so the totals don't shift as their numbers
+   change (e.g. while hovering days). */
+.total {
+  width: 4rem;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Its label is longer. */
+.total.wide {
+  width: 5.5rem;
+}
+
+/* The number sits close over its label. */
+.total .big {
+  line-height: 0.95;
+}
+
+.total .sub {
+  font-weight: 600;
+}
+
+/* Heavier icons, to match the bolder text. */
+.total .sub svg {
+  stroke-width: 2.5;
+  padding-top: 1px;
 }
 
 .big {
@@ -581,7 +608,7 @@ h2 {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     column-gap: 2.5rem;
-    padding: 2rem var(--gutter);
+    padding: 1.6rem var(--gutter) 2rem;
   }
 
   .sidebar-top {
@@ -590,7 +617,7 @@ h2 {
 
   .panel {
     --pad: var(--gutter);
-    padding: 2rem var(--pad) 4rem;
+    padding: 1.6rem var(--pad) 4rem;
   }
 }
 
