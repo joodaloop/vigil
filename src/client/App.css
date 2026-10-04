@@ -259,7 +259,7 @@ select option {
 /* Visitors, under the lists: their numbers and countries at either end,
    then their chart running to the panel's edges like the main one. */
 .people {
-  margin-top: 3rem;
+  margin-top: 4rem;
 }
 
 .people > .chart {
@@ -329,7 +329,7 @@ select option {
 /* Each big number's block. Fixed width, left-aligned, so the totals (and the
    columns beside Visitors) don't shift as their numbers change. */
 .total {
-  width: 5.5rem;
+  width: 6.2rem;
   text-align: left;
 }
 
@@ -357,7 +357,6 @@ select option {
 .sub {
   display: flex;
   gap: 0.75rem;
-  margin-top: 0.15rem;
 }
 
 /* One per line. */

@@ -8,7 +8,7 @@
         "noEmit": true,
         "jsx": "preserve",
         "jsxImportSource": "@solidjs/web",
-        "lib": ["ES2022", "DOM", "DOM.Iterable"],
+        "lib": ["ES2022", "ES2023.Intl", "DOM", "DOM.Iterable"],
         "types": ["vite/client"]
     },
     "include": ["src/client/**/*", "src/shared/**/*", "vite.config.ts"]

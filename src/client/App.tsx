@@ -47,8 +47,14 @@ async function get<T>(path: string, params: Record<string, string | null>): Prom
   return r.json();
 }
 
-// 950 -> "950", 4321 -> "4.3k", 17694 -> "17.7k", 1250000 -> "1.3M"
-const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+// 950 -> "950", 4321 -> "4.3k", 17694 -> "17.7k", 123456 -> "123k", 1250000 -> "1.3M":
+// one decimal at most, and none once there are three digits.
+const compact = new Intl.NumberFormat("en", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+  maximumSignificantDigits: 3,
+  roundingPriority: "lessPrecision",
+});
 const num = (n: number) => compact.format(n).replace("K", "k");
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 // A list row's share of its list, for the bar behind it; none under 0.25%.
@@ -249,12 +255,12 @@ function Stats(props: {
           <div class="totals">
             <div class="total" style={{ color: theme.stats.views }}>
               <div class="big">{num(shown("views"))}</div>
-              <div class="big-label">Views</div>
+              <div class="big-label">Page views</div>
               {/* Read: visible for long enough (30s unless the tracker's
                   data-read-after says otherwise). */}
               <div class="sub">
-                <span title="Reads: views that stayed on screen long enough">
-                  {num(shown("reads"))} reads
+                <span title="Engaged: views that stayed on screen long enough">
+                  {num(shown("reads"))} engaged
                 </span>
               </div>
             </div>
