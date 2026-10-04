@@ -415,6 +415,8 @@ function Referrers(props: {
 // there are.
 // `first` shows the first page without forgetting the one picked, e.g. while
 // a day is hovered and the list is ranked by it.
+// The page buttons are one tab stop, the current page's: arrow keys, Home
+// and End move between pages from there.
 function Paged<T>(props: {
   items: T[];
   size?: number;
@@ -427,6 +429,21 @@ function Paged<T>(props: {
   // Stay in range when the list shrinks (new period, filter or site).
   const current = () => (props.first ? 0 : Math.min(page(), pages() - 1));
   const start = () => current() * size();
+  const onKeyDown = (e: KeyboardEvent & { currentTarget: HTMLElement }) => {
+    const to = {
+      ArrowLeft: current() - 1,
+      ArrowUp: current() - 1,
+      ArrowRight: current() + 1,
+      ArrowDown: current() + 1,
+      Home: 0,
+      End: pages() - 1,
+    }[e.key];
+    if (to === undefined) return;
+    e.preventDefault(); // or the arrows would scroll the page
+    const next = Math.max(0, Math.min(to, pages() - 1));
+    setPage(next);
+    (e.currentTarget.children[next] as HTMLElement | undefined)?.focus();
+  };
 
   return (
     <>
@@ -435,7 +452,7 @@ function Paged<T>(props: {
           {(item) => props.children(item)}
         </For>
       </div>
-      <div class="pager">
+      <div class="pager" onKeyDown={onKeyDown}>
         <Show when={pages() > 1}>
           <For each={Array.from({ length: pages() }, (_, i) => i)}>
             {(i) => (
@@ -443,6 +460,7 @@ function Paged<T>(props: {
                 class={{ current: i === current() }}
                 aria-label={`Page ${i + 1} of ${pages()}`}
                 aria-current={i === current() ? "page" : undefined}
+                tabindex={i === current() ? 0 : -1}
                 onClick={() => setPage(i)}
               />
             )}

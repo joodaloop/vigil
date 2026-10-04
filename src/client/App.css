@@ -46,6 +46,14 @@ button:disabled {
   cursor: default;
 }
 
+/* On its edge: sites, rows and page numbers have padding to spare, and rows
+   touch, so one any further out would cover its neighbours'. */
+button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 0;
+  border-radius: 2px;
+}
+
 .muted {
   color: var(--muted);
 }
@@ -115,12 +123,14 @@ main {
 
 /* ---- Sidebar ---- */
 
+/* Hosts are spaced by their own padding, not a gap or the sidebar's, so
+   their whole area is clickable; the rest of the sidebar is inset to match. */
 .sidebar {
+  --item-pad: 0.75rem; /* each host's side padding */
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
   min-width: 0;
-  padding: 2rem 1.75rem 4rem;
+  padding: 2rem calc(1.75rem - var(--item-pad)) 3.75rem;
 }
 
 /* Name on the left, period on the right. */
@@ -129,7 +139,8 @@ main {
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.75rem;
+  margin-bottom: 2rem;
+  padding-inline: var(--item-pad);
   font-size: 0.9rem;
   line-height: 1.5em;
 }
@@ -148,6 +159,13 @@ h1 {
   padding-top: 3px;
 }
 
+/* The select is invisible over the picker, so the picker shows its focus. */
+.days-picker:has(select:focus-visible) {
+  outline: 2px solid var(--text);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
 .days-num {
   font-size: 1.4rem;
   line-height: 0.9;
@@ -164,7 +182,6 @@ h1 {
   width: 100%;
   opacity: 0;
   border: 0;
-  outline: none;
   appearance: none;
   cursor: pointer;
 }
@@ -179,7 +196,7 @@ select option {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 0.6rem 0;
+  padding: 0.85rem var(--item-pad);
 }
 
 .host-name {
@@ -407,14 +424,18 @@ select option {
   max-width: 22rem;
 }
 
-/* A full page of rows, so a short page is as tall as a full one. */
+/* A full page of rows, so a short page is as tall as a full one. Rows have
+   side padding, so all of their width is clickable; the list is pulled out
+   by it so their text stays in line with the rest of the panel. */
 .paged {
+  --row-x: 4px;
   min-height: calc(var(--rows) * (var(--list-text) * var(--line) + 2 * var(--row-pad)));
+  margin-inline: calc(-1 * var(--row-x));
 }
 
 .row,
 .referrer {
-  padding: var(--row-pad) 0;
+  padding: var(--row-pad) var(--row-x);
   font-size: var(--list-text);
 }
 
@@ -431,7 +452,8 @@ select option {
    and behind each referrer's, its share of new visitors; starting a little
    left of the row and at most filling the name's column, stopping 1rem
    short of the sparkline. `--tail` is everything after that column: the
-   1rem, the sparkline, the two numbers and the gaps between them. */
+   1rem, the sparkline, the two numbers, the gaps between them and the
+   row's right padding. */
 .row,
 .referrer {
   position: relative;
@@ -439,11 +461,11 @@ select option {
 }
 
 .row {
-  --tail: calc(1rem + var(--spark) + 2 * var(--num) + 2 * 0.5rem);
+  --tail: calc(1rem + var(--spark) + 2 * var(--num) + 2 * 0.5rem + var(--row-x));
 }
 
 .referrer {
-  --tail: calc(1rem + var(--spark) + 2 * var(--num) + 2 * 0.4rem);
+  --tail: calc(1rem + var(--spark) + 2 * var(--num) + 2 * 0.4rem + var(--row-x));
 }
 
 .row::before,
@@ -451,9 +473,9 @@ select option {
   --out: 4px;
   content: "";
   position: absolute;
-  inset: 0 auto 0 calc(-1 * var(--out));
+  inset: 0 auto 0 calc(var(--row-x) - var(--out));
   z-index: -1;
-  width: calc((100% - var(--tail) + var(--out)) * var(--share, 0));
+  width: calc((100% - var(--row-x) - var(--tail) + var(--out)) * var(--share, 0));
   background: color-mix(in srgb, var(--views) 20%, transparent);
 }
 
@@ -477,13 +499,17 @@ select option {
   flex-direction: column;
 }
 
-/* A referrer: its name (click to filter), then its visits. */
+/* A referrer: its name (click to filter), then its visits. The name is the
+   button, so it takes the row's padding on the left, above and below, and
+   its own on the right comes out of the gap. */
 .referrer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;
+  gap: calc(1rem - var(--row-x));
   min-width: 0;
+  padding-block: 0;
+  padding-left: 0;
 }
 
 /* An icon, then the name, cut short if it has to be. */
@@ -492,6 +518,7 @@ select option {
   align-items: center;
   gap: 0.4rem;
   min-width: 0;
+  padding: var(--row-pad) var(--row-x);
 }
 
 .ref-icon {
@@ -580,7 +607,7 @@ select option {
   .sidebar {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: 2.5rem;
+    column-gap: 1rem;
   }
 
   .sidebar-top {
