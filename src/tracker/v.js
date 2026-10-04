@@ -3,7 +3,9 @@
 // where /_v/* is proxied to the Vigil Worker (see README).
 //
 // A page view is recorded on the first scroll that follows real user input,
-// so scroll restoration and #anchor jumps don't count. Once the page has been
+// so scroll restoration and #anchor jumps don't count. With
+// data-count-on="input", the first real input counts it instead, for pages
+// that pan or zoom without scrolling (e.g. with panzoom). Once the page has been
 // visible for 30 seconds (or data-read-after="N" on the script tag), the view
 // also counts as a read.
 (function () {
@@ -11,6 +13,7 @@
     if (!script) return;
     var base = script.src.replace(/\/[^/]*$/, ""); // ".../_v"
     var readAfterMs = (Number(script.dataset && script.dataset.readAfter) || 30) * 1000;
+    var countOnInput = !!script.dataset && script.dataset.countOn === "input";
 
     var view, timer;
 
@@ -68,9 +71,15 @@
 
     function onInput() {
         view.input = true;
+        if (countOnInput) send();
     }
 
     function onScroll() {
+        send();
+    }
+
+    // Record the current view, once it has had real input.
+    function send() {
         // The request belongs to this view even if an SPA navigation happens
         // before its response arrives.
         var current = view;

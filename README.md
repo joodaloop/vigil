@@ -61,6 +61,10 @@ fed by a tracker that only counts a page view once the reader scrolls.
    Add `data-read-after="60"` to change how many seconds on screen count as a
    read (default 30), e.g. longer on long essays.
 
+   On pages that pan or zoom without scrolling (e.g. a map using panzoom),
+   add `data-count-on="input"` so the first real input (a drag, wheel, touch
+   or key) counts the view rather than the first scroll.
+
 The proxy is what makes the cookie first-party; without it, visitor
 tracking won't work.
 

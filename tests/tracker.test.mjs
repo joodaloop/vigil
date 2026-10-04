@@ -66,6 +66,7 @@ function tracker(dataset = {}) {
             }
             time = end;
         },
+        emit,
         scroll() { emit("wheel"); emit("scroll"); },
         navigate(path, method = "pushState") { history[method](null, "", path); },
         hide() { document.visibilityState = "hidden"; emit("visibilitychange"); },
@@ -113,6 +114,19 @@ test("data-read-after sets the threshold", async () => {
     await t.resolve(0, 303);
     t.tick(10_000);
     assert.deepEqual(t.reads, [{ url: "/_v/read", id: 303 }]);
+});
+
+test("data-count-on=input counts a view on input alone", () => {
+    const t = tracker({ countOn: "input" });
+    t.emit("scroll");
+    assert.equal(t.requests.length, 0, "scrolling without input still doesn't count");
+    t.emit("pointerdown");
+    t.emit("wheel");
+    assert.equal(t.requests.length, 1, "counted once");
+
+    const plain = tracker();
+    plain.emit("pointerdown");
+    assert.equal(plain.requests.length, 0, "by default it waits for a scroll");
 });
 
 test("a read reached before the hit's id arrives is sent with it", async () => {
