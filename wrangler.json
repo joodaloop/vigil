@@ -1,25 +1,21 @@
 {
-    "name": "vigil",
-    "main": "./src/worker/index.ts",
-    "compatibility_date": "2025-09-01",
-    "compatibility_flags": [
-        "nodejs_compat"
-    ],
-    "assets": {
-        "not_found_handling": "single-page-application",
-        "run_worker_first": [
-            "/api/*",
-            "/_v/*"
-        ]
-    },
-    "d1_databases": [
-        {
-            "binding": "DB",
-            "database_name": "vigil",
-            "database_id": "00000000-0000-0000-0000-000000000000"
-        }
-    ],
-    "vars": {
-        "SITES": [{ "host": "localhost", "name": "Local test" }]
+  "name": "vigil",
+  "main": "./src/worker/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "preview_urls": false,
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/_v/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vigil",
+      "database_id": "00000000-0000-0000-0000-000000000000"
     }
+  ],
+  "vars": {
+    "SITES": [{ "host": "localhost", "name": "Local test" }]
+  }
 }
