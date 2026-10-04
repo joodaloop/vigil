@@ -117,45 +117,50 @@ main {
   flex-direction: column;
   gap: 0.5rem;
   min-width: 0;
-  padding: 3.2rem 1.75rem 3rem;
+  padding: 2rem 1.75rem;
 }
 
 /* Name on the left, period on the right. */
 .sidebar-top {
   display: flex;
   align-items: flex-start;
-  gap: 1.25rem;
+  justify-content: space-between;
+  gap: 1rem;
   margin-bottom: 1.75rem;
+  font-size: 0.9rem;
+  line-height: 1.5em;
+  letter-spacing: -0.01em;
 }
 
 h1 {
-  margin: 0 auto 0 0; /* the period to the right */
   font-size: 2.4rem;
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1;
-  /* Split into the three stat colours, left to right. The background only
-     paints inside the box, so it's stretched down past the descenders
-     (and the layout pulled back up). */
   padding-bottom: 0.25em;
-  margin-bottom: -0.25em;
-  background: linear-gradient(to right, var(--views) 0 33.3%, var(--visitors) 33.3% 66.7%, var(--new) 66.7%);
-  background-clip: text;
-  color: transparent;
+  margin: 0px 0px -0.25em;
 }
 
-/* The select is invisible, covering the number, at normal size so its
-   menu is too. */
 .days-picker {
   position: relative;
   text-align: right;
+  padding-top: 3px;
+}
+
+.days-num {
+  font-size: 1.4rem;
+  line-height: 0.9;
+  font-weight: 600;
+}
+
+.days-label {
+  font-weight: 600;
 }
 
 .days-picker select {
   position: absolute;
   inset: 0;
   width: 100%;
-  font-size: 15px;
   opacity: 0;
   border: 0;
   outline: none;
@@ -167,29 +172,19 @@ select option {
   background: var(--bg);
 }
 
-.days-num {
-  font-size: 1.4rem;
-  line-height: 1;
-}
-
-.days-label {
-  font-size: 0.85rem;
-  line-height: 1.2;
-}
-
 /* A host: its name, then views and new visitors beside a sparkline of its
    views. */
 .host-item {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0rem;
   min-width: 0;
   padding: 0.6rem 0;
 }
 
 .host-name {
   font-size: 1.15rem;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .host-nums {
@@ -221,9 +216,9 @@ select option {
 /* ---- Panel ---- */
 
 .panel {
-  --pad: 3rem; /* side padding, which the big chart bleeds through */
+  --pad: 2.5rem; /* side padding, which the big chart bleeds through */
   min-width: 0;
-  padding: 3.2rem var(--pad) 5rem;
+  padding: 2rem var(--pad) 5rem;
   background: var(--surface);
 }
 
@@ -258,18 +253,18 @@ select option {
   justify-content: space-between;
   align-items: flex-start;
   gap: 2rem;
-  margin-bottom: 0.5rem; /* the chart has its own headroom */
+  margin-bottom: 1rem;
 }
 
 /* Visitors, under the lists: their numbers and countries at either end,
    then their chart running to the panel's edges like the main one. */
 .people {
-  margin-top: 4rem;
+  margin-top: 3rem;
 }
 
 .people > .chart {
   width: calc(100% + 2 * var(--pad));
-  margin: 0 calc(-1 * var(--pad));
+  margin: 1rem calc(-1 * var(--pad));
 }
 
 .people-head {
@@ -330,14 +325,6 @@ select option {
   min-width: 0;
 }
 
-h2 {
-  margin: 0;
-  font-size: 2.4rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1;
-}
-
 .host-url {
   color: var(--muted);
 }
@@ -391,6 +378,7 @@ h2 {
   display: flex;
   gap: 0.75rem;
   margin-top: 0.15rem;
+  letter-spacing: -0.05em;
 }
 
 /* One per line. */
@@ -417,15 +405,18 @@ h2 {
 /* Pages and referrers side by side, under the chart: 20rem each at most,
    both narrowing in step when there isn't room. */
 .lists {
-  --pages: 20rem;
-  --referrers: 20rem;
   --gap: 4rem;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   column-gap: var(--gap);
-  max-width: calc(var(--pages) + var(--referrers) + var(--gap));
+  justify-content: space-between;
   align-items: start;
   margin-top: 2.5rem;
+}
+
+.referrers,
+.pages {
+  max-width: 22rem;
 }
 
 /* A full page of rows, so a short page is as tall as a full one. */
@@ -608,7 +599,6 @@ h2 {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     column-gap: 2.5rem;
-    padding: 1.6rem var(--gutter) 2rem;
   }
 
   .sidebar-top {
@@ -617,7 +607,6 @@ h2 {
 
   .panel {
     --pad: var(--gutter);
-    padding: 1.6rem var(--pad) 4rem;
   }
 }
 
@@ -625,15 +614,11 @@ h2 {
   /* Lists stack. */
   .lists {
     grid-template-columns: minmax(0, 1fr);
-    row-gap: 4rem;
+    row-gap: 2.5rem;
   }
 
-  .pages {
-    max-width: var(--pages);
-  }
-
-  .referrers {
-    max-width: var(--referrers);
+  .paged {
+    min-height: unset;
   }
 
   .stats-head {

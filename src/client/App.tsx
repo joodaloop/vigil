@@ -5,7 +5,7 @@ import { Chart } from "./Chart";
 import { DEFAULT_PERIOD, PERIODS } from "./config";
 import { ICONS } from "./icons";
 import { referrerIcon, referrerName } from "../shared/referrers";
-import { nextTheme, theme } from "./theme";
+import { theme } from "./theme";
 
 // What's shown, and fetched.
 type Query = {
@@ -97,17 +97,7 @@ export function App(props: { sites: Site[] }) {
       <main>
         <nav class="sidebar">
           <div class="sidebar-top">
-            <h1>
-              <button
-                type="button"
-                onClick={nextTheme}
-                title={`Theme: ${theme().name}. Click for the next one.`}
-              >
-                Vigil
-              </button>
-            </h1>
-            {/* Shown like a total; the real select sits invisibly on top at
-              normal size, so its native menu isn't oversized. */}
+            <p> Useful, minimal, & privacy-unfriendly analytics. </p>
             <div class="days-picker">
               <div class="days-num" aria-hidden="true">
                 {latest(() => query().days)}
@@ -149,10 +139,10 @@ export function App(props: { sites: Site[] }) {
                     <Show when={!empty()} fallback={<span class="muted">No stats yet</span>}>
                       <span class="host-nums">
                         <span class="host-counts">
-                          <span style={{ color: theme().stats.views }}>
+                          <span style={{ color: theme.stats.views }}>
                             {num(s()?.totals.views ?? 0)}
                           </span>
-                          <span style={{ color: theme().stats.new }}>
+                          <span style={{ color: theme.stats.new }}>
                             {num(s()?.totals.new ?? 0)}
                           </span>
                         </span>
@@ -161,7 +151,7 @@ export function App(props: { sites: Site[] }) {
                           lines={[
                             {
                               values: s()?.daily.views ?? [],
-                              color: theme().stats.views,
+                              color: theme.stats.views,
                               scale: "count",
                             },
                           ]}
@@ -244,14 +234,14 @@ function Stats(props: {
         {/* Name and address on the left, totals on the right. */}
         <div class="stats-head">
           <div class="host-title">
-            <h2>{props.name}</h2>
+            <h1>{props.name}</h1>
             <span class="host-url">
               {day() === null ? props.host : fullDate.format(props.days[day()!] * 1000)}
             </span>
           </div>
           {/* While a day is hovered: its numbers. */}
           <div class="totals">
-            <div class="total" style={{ color: theme().stats.views }}>
+            <div class="total" style={{ color: theme.stats.views }}>
               <div class="big">{num(shown("views"))}</div>
               <div class="big-label">Views</div>
               {/* Read: visible for long enough (30s unless the tracker's
@@ -262,13 +252,15 @@ function Stats(props: {
                 </span>
               </div>
             </div>
-            <div class="total wide" style={{ color: theme().stats.new }}>
+            <div class="total wide" style={{ color: theme.stats.new }}>
               <div class="big">{num(shown("new"))}</div>
               <div class="big-label">New visitors</div>
               {/* Only known for the whole period, so it stays put while a day
                   is hovered. */}
               <div class="sub icons">
-                <span title={`Bounced: ${num(t().newBounced)} new visitors viewed one page and never came back`}>
+                <span
+                  title={`Bounced: ${num(t().newBounced)} new visitors viewed one page and never came back`}
+                >
                   <BounceIcon /> {pct(t().newBounced, t().new)}%
                 </span>
               </div>
@@ -279,9 +271,14 @@ function Stats(props: {
         <Chart
           days={props.days}
           lines={[
-            { values: props.stats.daily.views, color: theme().stats.views, scale: "count" },
-            { values: props.stats.daily.reads, color: theme().stats.views, scale: "count", dash: [9, 4] },
-            { values: props.stats.daily.new, color: theme().stats.new, scale: "count" },
+            { values: props.stats.daily.views, color: theme.stats.views, scale: "count" },
+            {
+              values: props.stats.daily.reads,
+              color: theme.stats.views,
+              scale: "count",
+              dash: [9, 4],
+            },
+            { values: props.stats.daily.new, color: theme.stats.new, scale: "count" },
           ]}
           height={160}
           headroom={8}
@@ -378,18 +375,18 @@ function Referrers(props: {
                 <span class="ref-label">{referrerName(r.domain)}</span>
               </button>
               {/* A sparkline of its daily views, then its views and new visitors. */}
-              <span class="ref-count" style={{ color: theme().stats.views }}>
+              <span class="ref-count" style={{ color: theme.stats.views }}>
                 <span class="ref-spark" aria-hidden="true">
                   <Chart
                     days={props.days}
-                    lines={[{ values: r.daily, color: theme().stats.views, scale: "count" }]}
+                    lines={[{ values: r.daily, color: theme.stats.views, scale: "count" }]}
                     maxes={max()}
                     height={16}
                     lineWidth={1.25}
                   />
                 </span>
                 <span class="ref-num">{num(views(r))}</span>
-                <span class="ref-num" style={{ color: theme().stats.new }}>
+                <span class="ref-num" style={{ color: theme.stats.new }}>
                   {fresh(r) > 0 ? num(fresh(r)) : ""}
                 </span>
               </span>
@@ -473,16 +470,16 @@ function PageItem(props: {
       <span class="page-spark" aria-hidden="true">
         <Chart
           days={props.days}
-          lines={[{ values: props.page.daily, color: theme().stats.views, scale: "count" }]}
+          lines={[{ values: props.page.daily, color: theme.stats.views, scale: "count" }]}
           maxes={props.max}
           height={16}
           lineWidth={1.25}
         />
       </span>
-      <span class="num" style={{ color: theme().stats.views }}>
+      <span class="num" style={{ color: theme.stats.views }}>
         {num(props.day === null ? props.page.views : props.page.daily[props.day])}
       </span>
-      <span class="num" style={{ color: theme().stats.new }}>
+      <span class="num" style={{ color: theme.stats.new }}>
         {(() => {
           const n = props.day === null ? props.page.new : props.page.dailyNew[props.day];
           return n > 0 ? num(n) : "";
@@ -520,7 +517,7 @@ function People(props: {
       <div class="people-head">
         <div class="totals">
           <div class="beside">
-            <div class="beside-num" style={{ color: theme().stats.visitors }}>
+            <div class="beside-num" style={{ color: theme.stats.visitors }}>
               <div class="big">{num(t().visitors)}</div>
               <div class="big-label">Visitors</div>
             </div>
@@ -555,7 +552,7 @@ function People(props: {
       <Chart
         days={props.days}
         lines={[
-          { values: props.stats.daily.visitors, color: theme().stats.visitors, scale: "count" },
+          { values: props.stats.daily.visitors, color: theme.stats.visitors, scale: "count" },
         ]}
         height={120}
         lineWidth={2}
@@ -633,9 +630,8 @@ function Countries(props: {
   );
 }
 
-// Each source's icon in its brand colour; brands whose logo is black in the
-// theme's text colour, so it shows on dark themes too. Other sites' links are
-// in the theme's blue and the site's own pages in its green.
+// Each source's icon in its brand colour; black logos use the text colour.
+// Other sites' links use blue and the site's own pages use green.
 const ICON_STYLE: Record<string, { size?: number; color: () => string }> = {
   google: { color: () => "#EA4335" },
   bing: { color: () => "#0078D4" },
@@ -651,19 +647,19 @@ const ICON_STYLE: Record<string, { size?: number; color: () => string }> = {
   twitter: { color: () => "#1DA1F2" },
   bluesky: { color: () => "#1185FE" },
   mastodon: { color: () => "#6364FF" },
-  threads: { color: () => theme().text },
+  threads: { color: () => theme.text },
   facebook: { color: () => "#1877F2" },
   instagram: { color: () => "#E4405F" },
   linkedin: { color: () => "#0A66C2" },
   youtube: { color: () => "#FF0000" },
-  github: { color: () => theme().text },
+  github: { color: () => theme.text },
   medium: { color: () => "#00AB6C" },
   substack: { color: () => "#FF6719" },
-  openai: { color: () => theme().text },
+  openai: { color: () => theme.text },
   perplexity: { color: () => "#1FB8CD" },
   claude: { color: () => "#D97757" },
-  link: { color: () => theme().stats.views },
-  file: { color: () => theme().stats.visitors },
+  link: { color: () => theme.stats.views },
+  file: { color: () => theme.stats.visitors },
 };
 
 // A source's icon (icons.ts), centred in a slot as wide as the largest one,
