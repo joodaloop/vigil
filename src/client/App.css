@@ -3,7 +3,9 @@
 
 :root {
   --gutter: 24px; /* side padding on narrow screens */
+  --line: 1.45; /* body line height */
   --list-text: 0.9rem; /* rows in the pages and referrers lists */
+  --num: 2.3rem; /* each number column in the lists */
   --row-pad: 0.125rem; /* above and below each row, so rows touch and hover doesn't flicker */
   --spark: 3rem; /* the lists' sparklines */
 }
@@ -18,7 +20,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font:
-    15px/1.45 system-ui,
+    15px/var(--line) system-ui,
     -apple-system,
     "Segoe UI",
     sans-serif;
@@ -49,11 +51,10 @@ button:disabled {
 }
 
 /* Text that's cut short with "…" when there isn't room. */
-h2,
 .host-name,
 .host-url,
 .label,
-.ref-name {
+.ref-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -119,7 +120,7 @@ main {
   flex-direction: column;
   gap: 0.5rem;
   min-width: 0;
-  padding: 2rem 1.75rem;
+  padding: 2rem 1.75rem 4rem;
 }
 
 /* Name on the left, period on the right. */
@@ -177,7 +178,6 @@ select option {
 .host-item {
   display: flex;
   flex-direction: column;
-  gap: 0rem;
   min-width: 0;
   padding: 0.6rem 0;
 }
@@ -188,10 +188,12 @@ select option {
 }
 
 .host-nums {
+  --count: 2.6rem; /* each number, wide enough for "99.9k" */
+  --count-gap: 0.6rem;
   display: grid;
-  /* The numbers in a fixed-width cell (wide enough for "5.5k 3.4k"), so
-     every host's sparkline starts in the same place. */
-  grid-template-columns: 5.8rem minmax(0, 1fr);
+  /* The numbers in a fixed-width cell, so every host's sparkline starts in
+     the same place. */
+  grid-template-columns: calc(2 * var(--count) + var(--count-gap)) minmax(0, 1fr);
   column-gap: 0.6rem;
   /* A chart's baseline is its bottom edge, so this sits it on the numbers'
      baseline; pulled down by its padding (Chart's ceil(lineWidth)) so its
@@ -202,11 +204,11 @@ select option {
 /* Each number in a fixed width too, so they line up from host to host. */
 .host-counts {
   display: flex;
-  gap: 0.6rem;
+  gap: var(--count-gap);
 }
 
 .host-counts > span {
-  width: 2.6rem;
+  width: var(--count);
 }
 
 .host-nums .chart {
@@ -241,10 +243,11 @@ select option {
   flex-direction: column;
 }
 
-/* The big chart runs to the panel's edges. */
-.stats-main > .chart {
+/* The big charts run to the panel's edges. */
+.stats-main > .chart,
+.people > .chart {
   width: calc(100% + 2 * var(--pad));
-  margin: 0 calc(-1 * var(--pad));
+  margin-inline: calc(-1 * var(--pad));
 }
 
 /* Name and address on the left, totals on the right. */
@@ -263,8 +266,7 @@ select option {
 }
 
 .people > .chart {
-  width: calc(100% + 2 * var(--pad));
-  margin: 1rem calc(-1 * var(--pad));
+  margin-block: 1rem;
 }
 
 .people-head {
@@ -278,10 +280,6 @@ select option {
 .beside {
   display: flex;
   align-items: flex-start;
-}
-
-.beside .sub {
-  margin-top: 0;
 }
 
 /* Countries' flags, sized by visitors, set as a line of text so the lines
@@ -330,22 +328,17 @@ select option {
    columns beside Visitors) don't shift as their numbers change. */
 .total {
   width: 6.2rem;
-  text-align: left;
-}
-
-/* The number sits close over its label. */
-.total .big {
-  line-height: 0.95;
 }
 
 .total .sub {
   font-weight: 600;
 }
 
+/* The number sits close over its label. */
 .big {
   font-size: 1.9rem;
   font-weight: 600;
-  line-height: 1.1;
+  line-height: 0.95;
 }
 
 .big-label {
@@ -367,7 +360,7 @@ select option {
   margin-right: 1.5rem;
 }
 
-/* Icons differ in width, so give them a fixed column to keep the numbers aligned. */
+/* Icons differ in width, so give them a fixed column to keep the bars aligned. */
 .icons > span {
   display: grid;
   grid-template-columns: 1.1rem auto;
@@ -410,7 +403,7 @@ select option {
 
 /* A full page of rows, so a short page is as tall as a full one. */
 .paged {
-  min-height: calc(var(--rows) * (var(--list-text) * 1.45 + 2 * var(--row-pad)));
+  min-height: calc(var(--rows) * (var(--list-text) * var(--line) + 2 * var(--row-pad)));
 }
 
 .row,
@@ -423,7 +416,7 @@ select option {
    visitors. */
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--spark) 2.3rem 2.3rem;
+  grid-template-columns: minmax(0, 1fr) var(--spark) var(--num) var(--num);
   gap: 0.5rem;
   width: 100%;
 }
@@ -440,11 +433,11 @@ select option {
 }
 
 .row {
-  --tail: calc(1rem + var(--spark) + 2 * 2.3rem + 2 * 0.5rem);
+  --tail: calc(1rem + var(--spark) + 2 * var(--num) + 2 * 0.5rem);
 }
 
 .referrer {
-  --tail: calc(1rem + var(--spark) + 2 * 2.3rem + 2 * 0.4rem);
+  --tail: calc(1rem + var(--spark) + 2 * var(--num) + 2 * 0.4rem);
 }
 
 .row::before,
@@ -503,11 +496,6 @@ select option {
   color: var(--muted);
 }
 
-.ref-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* A referrer's sparkline, then its views and new visitors. */
 .ref-count {
   display: flex;
@@ -517,7 +505,7 @@ select option {
 }
 
 .ref-num {
-  width: 2.3rem;
+  width: var(--num);
   text-align: right;
 }
 

@@ -656,7 +656,7 @@ function Countries(props: {
 }
 
 // Each source's icon in its brand colour; black logos use the text colour.
-// Other sites' links use blue and the site's own pages use green.
+// Other sites' links are plain and the site's own pages use green.
 const ICON_STYLE: Record<string, { size?: number; color: () => string }> = {
   google: { color: () => "#EA4335" },
   bing: { color: () => "#0078D4" },
@@ -683,7 +683,7 @@ const ICON_STYLE: Record<string, { size?: number; color: () => string }> = {
   openai: { color: () => theme.text },
   perplexity: { color: () => "#1FB8CD" },
   claude: { color: () => "#D97757" },
-  link: { color: () => theme.stats.views },
+  link: { color: () => theme.text },
   file: { color: () => theme.stats.visitors },
 };
 
