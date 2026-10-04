@@ -376,6 +376,7 @@ select option {
 
 .icons svg {
   justify-self: center;
+  color: var(--visitors);
 }
 
 /* A share's bar: a track, filled from the left in the visitors' colour. */
