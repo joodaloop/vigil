@@ -7,9 +7,9 @@
         "dev": "vite dev",
         "build": "vite build",
         "preview": "vite preview",
-        "deploy": "vite build && wrangler d1 migrations apply DB --remote && wrangler deploy",
-        "deploy:prod": "WRANGLER_CONFIG=wrangler.prod.json vite build && wrangler d1 migrations apply DB --remote -c wrangler.prod.json && wrangler deploy",
-        "db:migrate": "wrangler d1 migrations apply DB --local",
+        "deploy": "vite build && wrangler d1 execute DB --remote --file schema.sql && wrangler deploy",
+        "deploy:prod": "WRANGLER_CONFIG=wrangler.prod.json vite build && wrangler d1 execute DB --remote -c wrangler.prod.json --file schema.sql && wrangler deploy",
+        "db:init": "wrangler d1 execute DB --local --file schema.sql",
         "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
         "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test tests/*.test.mjs",
         "types:gen": "wrangler types"

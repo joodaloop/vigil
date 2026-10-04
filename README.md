@@ -5,9 +5,8 @@ fed by a tracker that only counts a page view once the reader scrolls.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/joodaloop/vigil)
 
-- **Schema:** [`migrations/0002_views.sql`](migrations/0002_views.sql), which reshapes the
-  original [`0001_init.sql`](migrations/0001_init.sql): raw `hits`, and the per-site counts
-  the dashboard reads
+- **Schema:** [`schema.sql`](schema.sql): raw `hits`, and the per-site counts the dashboard
+  reads. It's applied on every deploy and only creates what's missing.
 - **Collector:** `src/worker/collect.ts` (`POST /_v/hit`, `POST /_v/read`)
 - **Tracker:** `src/tracker/v.js`, served at `/_v/v.js`
 - **Dashboard:** `src/client/` (Solid), API goes in `src/worker/index.ts` under `/api/*`
@@ -69,7 +68,7 @@ tracking won't work.
 
 ```sh
 pnpm install
-pnpm db:migrate            # local D1
+pnpm db:init               # local D1
 printf 'VIGIL_DEV=1\nCOOKIE_SECRET=%s\n' "$(openssl rand -base64 32)" > .dev.vars
 pnpm dev
 ```
@@ -106,7 +105,7 @@ To deploy by hand instead:
 ```sh
 pnpm wrangler d1 create vigil          # once; copy its database_id into wrangler.json
 pnpm wrangler secret put COOKIE_SECRET # once; paste a long random string
-pnpm run deploy                        # builds, applies migrations remotely, deploys
+pnpm run deploy                        # builds, applies schema.sql remotely, deploys
 ```
 
 ### Deploying from a clone

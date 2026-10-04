@@ -1,26 +1,26 @@
 import type { HostStats, HostSummaries, Overview, PageRow, Referrer } from "../shared/types";
-import { filteredVisitors } from "./filtered";
+import { filteredVisitors } from "./uniques";
 import { configuredSites } from "./sites";
 
 // GET /api/overview?host=blog.example.co.uk&days=30
 //   Totals, daily series, referrers and pages for one site.
 // GET /api/hosts?days=30
-//   Headline totals and daily series for every configured site, unfiltered.
+//   Views (with a daily series) and new visitors for every configured site,
+//   unfiltered, for the sidebar.
 //
 // Both cover the last `days` UTC days (today included). The overview takes
 // optional `ref` (referrer domain) and `page` (path) filters.
 //
-// Every number is a SUM over `views` (migrations/0002_views.sql), except
+// Every number is a SUM over `views` (schema.sql), except
 // unique visitors: unfiltered, a count of `visitors`; under a filter, a count
-// of the filter's hits (filtered.ts), since readers can't be summed. A source is another site's domain, or on a click within the
+// of the filter's hits (uniques.ts), since readers can't be summed. A source is another site's domain, or on a click within the
 // site, the path of the page it came from (paths start with "/").
 
 type DailyRow = { day: number; views: number; visitors: number; new: number; reads: number };
 type PageDayRow = { page: string; day: number; views: number; new: number };
 type SourceDayRow = { source: string; day: number; views: number };
 type DeviceRow = { device: string | null; visitors: number; bounced: number };
-type HostDailyRow = { host: string; day: number; views: number; visitors: number; new: number };
-type HostVisitorsRow = { host: string; visitors: number };
+type HostDailyRow = { host: string; day: number; views: number; new: number };
 
 // The first day (UTC day number) of the last `numDays`, and each day's start
 // in unix seconds.
@@ -84,9 +84,9 @@ async function overview(
         byFilter
             ? env.DB.prepare(byFilter.people).bind(...byFilter.params)
             : env.DB.prepare(
-                  `SELECT device, COUNT(*) AS visitors, SUM(first_day >= ?2 AND NOT returned) AS bounced
-                   FROM visitors WHERE host = ?1 AND last_day >= ?2 GROUP BY device`,
-              ).bind(host, firstDay),
+                  `SELECT device, COUNT(*) AS visitors, SUM(first_ts >= ?2 AND first_ts = last_ts) AS bounced
+                   FROM visitors WHERE host = ?1 AND last_ts >= ?2 GROUP BY device`,
+              ).bind(host, firstDay * 86400),
         // Filtered, visitors per day; unfiltered, they're summed from `views`.
         ...(byFilter ? [env.DB.prepare(byFilter.daily).bind(...byFilter.params)] : []),
     ])) as [
@@ -151,31 +151,19 @@ async function hostSummaries(env: Env, hosts: string[], numDays: number): Promis
 
     // ?1 = first day, then the hosts.
     const IN = hosts.map((_, i) => `?${i + 2}`).join(",");
-    const q = (sql: string) => env.DB.prepare(sql).bind(firstDay, ...hosts);
-    const [daily, visitors] = (await env.DB.batch([
-        q(`SELECT host, day, SUM(views) AS views, SUM(visitors) AS visitors, SUM(new) AS new
-           FROM views WHERE host IN (${IN}) AND day >= ?1 GROUP BY host, day`),
-        // Distinct over the whole period; per-day counts would overlap.
-        q(`SELECT host, COUNT(*) AS visitors FROM visitors WHERE host IN (${IN}) AND last_day >= ?1 GROUP BY host`),
-    ])) as [D1Result<HostDailyRow>, D1Result<HostVisitorsRow>];
+    const { results } = await env.DB.prepare(
+        `SELECT host, day, SUM(views) AS views, SUM(new) AS new
+         FROM views WHERE host IN (${IN}) AND day >= ?1 GROUP BY host, day`,
+    )
+        .bind(firstDay, ...hosts)
+        .all<HostDailyRow>();
 
-    const zeros = () => Array(numDays).fill(0);
-    const host = (name: string) =>
-        (result.hosts[name] ??= {
-            totals: { views: 0, visitors: 0, new: 0 },
-            daily: { views: zeros(), visitors: zeros(), new: zeros() },
-        });
-    for (const r of daily.results) {
-        const h = host(r.host);
-        const i = r.day - firstDay;
-        h.daily.views[i] = r.views;
-        h.daily.visitors[i] = r.visitors;
-        h.daily.new[i] = r.new;
+    for (const r of results) {
+        const h = (result.hosts[r.host] ??= { totals: { views: 0, new: 0 }, daily: { views: Array(numDays).fill(0) } });
+        h.daily.views[r.day - firstDay] = r.views;
         h.totals.views += r.views;
         h.totals.new += r.new;
     }
-    for (const r of visitors.results) host(r.host).totals.visitors = r.visitors;
-
     return result;
 }
 

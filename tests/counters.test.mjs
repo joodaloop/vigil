@@ -3,12 +3,10 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { COUNT_READ, COUNT_VIEW, COUNT_VISITOR, READ_HIT } from "../src/worker/counters.ts";
-import { filteredVisitors } from "../src/worker/filtered.ts";
+import { filteredVisitors } from "../src/worker/uniques.ts";
 import { canonicalSource } from "../src/shared/referrers.ts";
 
-const migration = (name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8");
-const init = migration("0001_init.sql");
-const views = migration("0002_views.sql");
+const schema = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
 
 // Deterministic pseudo-random numbers, so a failure reproduces.
 function random(seed) {
@@ -34,7 +32,7 @@ function traffic(n = 3000) {
     const hits = [];
     let ts = 20000 * 86400;
     for (let id = 1; id <= n; id++) {
-        ts += Math.floor(rand() * ((60 * 86400) / n)) * 2;
+        ts += 1 + Math.floor(rand() * ((60 * 86400) / n)) * 2; // no two hits in the same second
         const arrival = rand() < 0.4;
         hits.push({
             id,
@@ -83,89 +81,10 @@ function reads(sql, hits, n = 3000) {
 
 function live(hits) {
     const sql = new DatabaseSync(":memory:");
-    sql.exec(init);
-    sql.exec(views);
+    sql.exec(schema);
     collect(sql, hits);
     return sql;
 }
-
-// Hits as the old collector (0001) recorded them, then migrated: text as ids
-// into `strings`, pages as host + path, arrivals pointing at themselves with
-// the referring site in `src`, clicks within the site pointing elsewhere with
-// the previous page in `src`, and visible time standing in for reads (30
-// seconds is a read).
-function migrated(rows) {
-    const sql = new DatabaseSync(":memory:");
-    sql.exec(init);
-    const intern = (value) => {
-        if (value == null || value === "") return null;
-        sql.prepare("INSERT OR IGNORE INTO strings (value) VALUES (?)").run(value);
-        return sql.prepare("SELECT id FROM strings WHERE value = ?").get(value).id;
-    };
-    const visitor = sql.prepare("INSERT OR IGNORE INTO visitors (id, first_seen, device) VALUES (?, 0, ?)");
-    const insert = sql.prepare(
-        `INSERT INTO hits (id, ts, site, host, page, visitor_id, entry_hit_id, src, engaged_s)
-         VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const h of rows) {
-        visitor.run(h.visitor_id, intern(device(h.visitor_id)));
-        const click = h.source.startsWith("/");
-        const engaged = h.read ? 30 + (h.id % 100) : h.id % 2 ? null : 29;
-        insert.run(
-            h.id,
-            h.ts,
-            intern(h.host),
-            intern(h.host + h.page),
-            h.visitor_id,
-            click ? 0 : h.id,
-            intern(click ? h.host + h.source : h.source),
-            engaged,
-        );
-    }
-    sql.exec(views);
-    return sql;
-}
-
-const dump = (sql, table) => sql.prepare(`SELECT * FROM ${table} ORDER BY 1, 2, 3, 4`).all();
-
-test("counting per hit matches the migration's backfill from raw hits", () => {
-    const hits = traffic();
-    const sql = live(hits);
-    reads(sql, hits);
-    const rows = sql.prepare("SELECT * FROM hits ORDER BY id").all();
-    const backfilled = migrated(rows);
-
-    assert.ok(rows.filter((h) => h.read).length > 1000);
-    for (const table of ["hits", "views", "visitors"]) {
-        assert.deepEqual(dump(sql, table), dump(backfilled, table), table);
-    }
-});
-
-test("the backfill keeps arrivals' referrers and clicks' previous pages, and splits visitors by host", () => {
-    // An old trip: an arrival from news.example, a click within the site,
-    // then a click across to another host.
-    const old = new DatabaseSync(":memory:");
-    old.exec(init);
-    old.exec(`
-        INSERT INTO strings (id, value) VALUES (1, 'a.test'), (2, 'b.test'), (3, 'a.test/one'), (4, 'a.test/two'),
-            (5, 'b.test/three'), (6, 'news.example');
-        INSERT INTO visitors (id, first_seen) VALUES (7, 0);
-        INSERT INTO hits (id, ts, site, host, page, visitor_id, entry_hit_id, src, engaged_s) VALUES
-            (1, 86400, 1, 1, 3, 7, 1, 6, 45),
-            (2, 86401, 1, 1, 4, 7, 1, 3, NULL),
-            (3, 86402, 1, 2, 5, 7, 1, 4, 10);`);
-    old.exec(views);
-    assert.deepEqual(
-        old.prepare("SELECT id, host, page, source, read FROM hits ORDER BY id").all().map((r) => ({ ...r })),
-        [
-            { id: 1, host: "a.test", page: "/one", source: "news.example", read: 1 },
-            { id: 2, host: "a.test", page: "/two", source: "/one", read: 0 },
-            { id: 3, host: "b.test", page: "/three", source: "", read: 0 },
-        ],
-    );
-    assert.equal(old.prepare("SELECT COUNT(*) AS n FROM visitors").get().n, 2, "one visitor per host");
-    assert.equal(old.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'strings'").get().n, 0);
-});
 
 test("sums over views and counts of visitors match scans of hits", () => {
     const hits = traffic();
@@ -187,10 +106,10 @@ test("sums over views and counts of visitors match scans of hits", () => {
 
             // Unique visitors, new visitors, bounces and devices in the period.
             assert.deepEqual(
-                all(`SELECT COUNT(*) AS visitors, IFNULL(SUM(first_day >= ?2), 0) AS new,
-                            IFNULL(SUM(first_day >= ?2 AND NOT returned), 0) AS bounced,
+                all(`SELECT COUNT(*) AS visitors, IFNULL(SUM(first_ts >= ?2 * 86400), 0) AS new,
+                            IFNULL(SUM(first_ts >= ?2 * 86400 AND first_ts = last_ts), 0) AS bounced,
                             IFNULL(SUM(device = 'mobile'), 0) AS mobile
-                     FROM visitors WHERE host = ?1 AND last_day >= ?2`, where),
+                     FROM visitors WHERE host = ?1 AND last_ts >= ?2 * 86400`, where),
                 all(`SELECT COUNT(DISTINCT visitor_id) AS visitors, IFNULL(SUM(first), 0) AS new,
                             IFNULL(SUM(first AND NOT EXISTS (SELECT 1 FROM hits p WHERE p.visitor_id = r.visitor_id
                                        AND p.host = r.host AND p.id > r.id)), 0) AS bounced,
@@ -244,27 +163,17 @@ test("a hit is read once, and only by its own visitor", () => {
     assert.deepEqual(row(), { reads: 1 });
 });
 
-test("a visitor's row is only written on their first hit of a day or their second ever", () => {
+test("a visitor's row keeps their first and latest hit's time", () => {
     const sql = new DatabaseSync(":memory:");
-    sql.exec(init);
-    sql.exec(views);
+    sql.exec(schema);
     const insert = sql.prepare("INSERT INTO hits (ts, host, page, visitor_id) VALUES (?, 'a.test', '/', 1)");
     const visitor = sql.prepare(COUNT_VISITOR);
-    const hit = (ts) => {
+    const row = () => ({ ...sql.prepare("SELECT first_ts, last_ts FROM visitors").get() });
+    for (const ts of [1000, 1060, 90000]) {
         insert.run(ts);
-        return visitor.run({ 1: null, 2: null, 3: null, 4: "desktop" }).changes;
-    };
-    const day = 20000 * 86400;
-    assert.equal(hit(day), 1, "first ever");
-    assert.equal(hit(day + 60), 1, "second ever");
-    assert.equal(hit(day + 120), 0, "again the same day");
-    assert.equal(hit(day + 86400), 1, "first of the next day");
-    assert.equal(hit(day + 86460), 0, "again that day");
-    assert.deepEqual({ ...sql.prepare("SELECT first_day, last_day, returned FROM visitors").get() }, {
-        first_day: 20000,
-        last_day: 20001,
-        returned: 1,
-    });
+        visitor.run({ 1: null, 2: null, 3: null, 4: "desktop" });
+        assert.deepEqual(row(), { first_ts: 1000, last_ts: ts });
+    }
 });
 
 test("visitors under a filter match a scan of the hits, through the covering indexes", () => {
@@ -318,23 +227,14 @@ test("visitors under a filter match a scan of the hits, through the covering ind
     assert.match(plan(null, "news.example"), /COVERING INDEX hits_source/);
 });
 
-test("the migration records each referring site under the same domain as the collector", () => {
-    const domains = ["google.com", "news.google.com", "t.co", "twitter.com", "mobile.twitter.com", "x.com", "lnkd.in",
-        "linkedin.com", "old.reddit.com", "l.facebook.com", "m.youtube.com", "someone.substack.com", "news.ycombinator.com",
-        "search.brave.com", "mastodon.social", "example.org", "blog.example.net"];
-    const old = new DatabaseSync(":memory:");
-    old.exec(init);
-    old.exec("INSERT INTO strings (id, value) VALUES (1, 'a.test'), (2, 'a.test/')");
-    domains.forEach((d, i) => {
-        old.prepare("INSERT INTO strings (id, value) VALUES (?, ?)").run(10 + i, d);
-        old.prepare(`INSERT INTO hits (id, ts, site, host, page, visitor_id, entry_hit_id, src)
-                     VALUES (?, 86400, 1, 1, 2, 1, ?, ?)`).run(i + 1, i + 1, 10 + i);
-    });
-    old.exec(views);
-    assert.deepEqual(
-        old.prepare("SELECT source FROM hits ORDER BY id").all().map((r) => r.source),
-        domains.map(canonicalSource),
-    );
+test("referring sites are recorded under one domain each", () => {
     assert.equal(canonicalSource("t.co"), "x.com");
-    assert.equal(canonicalSource("someone.substack.com"), "someone.substack.com");
+    assert.equal(canonicalSource("twitter.com"), "x.com");
+    assert.equal(canonicalSource("mobile.twitter.com"), "x.com");
+    assert.equal(canonicalSource("lnkd.in"), "linkedin.com");
+    assert.equal(canonicalSource("old.reddit.com"), "reddit.com");
+    assert.equal(canonicalSource("news.google.com"), "google.com");
+    assert.equal(canonicalSource("someone.substack.com"), "someone.substack.com", "names the newsletter");
+    assert.equal(canonicalSource("news.ycombinator.com"), "news.ycombinator.com");
+    assert.equal(canonicalSource("example.org"), "example.org");
 });

@@ -15,9 +15,6 @@ export type HostDaily = {
     new: number[];
 };
 
-// Views, distinct visitors and new visitors.
-export type Counts = { views: number; visitors: number; new: number };
-
 export type PageRow = {
     path: string;
     views: number;
@@ -32,10 +29,11 @@ export type HostStats = {
     pages: PageRow[]; // by views; referrer filter only
 };
 
-// The headline numbers for one host, for the sidebar.
+// The headline numbers for one host, for the sidebar: views (with a daily
+// series, for its sparkline) and new visitors.
 export type HostSummary = {
-    totals: Counts;
-    daily: HostDaily;
+    totals: { views: number; new: number };
+    daily: { views: number[] };
 };
 
 export type Referrer = {

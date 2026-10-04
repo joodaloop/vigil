@@ -177,8 +177,8 @@ select option {
   line-height: 1.2;
 }
 
-/* A host: its name, then views, visitors and new visitors beside a small
-   chart. */
+/* A host: its name, then views and new visitors beside a sparkline of its
+   views. */
 .host-item {
   display: flex;
   flex-direction: column;
@@ -194,12 +194,24 @@ select option {
 
 .host-nums {
   display: grid;
-  grid-template-columns: repeat(3, auto) minmax(0, 1fr);
+  /* The numbers in a fixed-width cell (wide enough for "5.5k 3.4k"), so
+     every host's sparkline starts in the same place. */
+  grid-template-columns: 5.8rem minmax(0, 1fr);
   column-gap: 0.6rem;
   /* A chart's baseline is its bottom edge, so this sits it on the numbers'
      baseline; pulled down by its padding (Chart's ceil(lineWidth)) so its
      zero line is what lands there. */
   align-items: last baseline;
+}
+
+/* Each number in a fixed width too, so they line up from host to host. */
+.host-counts {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.host-counts > span {
+  width: 2.6rem;
 }
 
 .host-nums .chart {
@@ -347,11 +359,12 @@ h2 {
   font-size: var(--list-text);
 }
 
-/* A page: its path, then views and new visitors. */
+/* A page: its path, a sparkline of its views, then its views and new
+   visitors. */
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(2, 2.3rem);
+  grid-template-columns: minmax(0, 1fr) var(--spark) 2.3rem 2.3rem;
   gap: 0.4rem;
   width: 100%;
 }
@@ -401,40 +414,23 @@ h2 {
   text-overflow: ellipsis;
 }
 
-/* Just the number's width, until hovering makes room for the sparkline; so
-   names only get cut short then. */
+/* A referrer's sparkline, then its count. */
 .ref-count {
-  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   flex-shrink: 0;
+}
+
+.ref-num {
+  min-width: 2.3rem;
   text-align: right;
 }
 
-/* While a list is hovered (not just its page squares), every row swaps its
-   numbers for a sparkline. The sparklines are drawn once per load; hovering
-   just changes which is visible. */
 .page-spark,
 .ref-spark {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
   display: flex;
   align-items: center;
-  width: var(--spark);
-  visibility: hidden;
-}
-
-.pages:has(.row:hover) .page-spark,
-.referrers:has(.referrer:hover) .ref-spark {
-  visibility: visible;
-}
-
-.pages:has(.row:hover) .num,
-.referrers:has(.referrer:hover) .ref-num {
-  visibility: hidden;
-}
-
-.referrers:has(.referrer:hover) .ref-count {
   width: var(--spark);
 }
 

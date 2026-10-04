@@ -151,18 +151,13 @@ export function App(props: { sites: Site[] }) {
                     <span class="host-name">{h.name}</span>
                     <Show when={!empty()} fallback={<span class="muted">No stats yet</span>}>
                       <span class="host-nums">
-                        <span style={{ color: theme().stats.views }}>
-                          {num(s()?.totals.views ?? 0)}
-                        </span>
-                        <span style={{ color: theme().stats.visitors }}>
-                          {num(s()?.totals.visitors ?? 0)}
-                        </span>
-                        <span style={{ color: theme().stats.new }}>
-                          {num(s()?.totals.new ?? 0)}
+                        <span class="host-counts">
+                          <span style={{ color: theme().stats.views }}>{num(s()?.totals.views ?? 0)}</span>
+                          <span style={{ color: theme().stats.new }}>{num(s()?.totals.new ?? 0)}</span>
                         </span>
                         <Chart
                           days={summaries().days}
-                          lines={chartLines(s())}
+                          lines={[{ values: s()?.daily.views ?? [], color: theme().stats.views, scale: "count" }]}
                           height={20}
                           lineWidth={1.5}
                         />
@@ -359,9 +354,8 @@ function Referrers(props: {
                 <SourceIcon name={referrerIcon(r.domain)} />
                 <span class="ref-label">{referrerName(r.domain)}</span>
               </button>
-              {/* Count, swapped for a sparkline while the list is hovered (CSS). */}
+              {/* A sparkline of its daily views, then the count. */}
               <span class="ref-count" style={{ color: theme().stats.views }}>
-                <span class="ref-num">{num(r.visits)}</span>
                 <span class="ref-spark" aria-hidden="true">
                   <Chart
                     days={props.days}
@@ -371,6 +365,7 @@ function Referrers(props: {
                     lineWidth={1.25}
                   />
                 </span>
+                <span class="ref-num">{num(r.visits)}</span>
               </span>
             </div>
           );
@@ -416,9 +411,8 @@ function Paged<T>(props: { items: T[]; size?: number; children: (item: T) => JSX
   );
 }
 
-// A page with its views and new visitors, which give way to a
-// sparkline of its daily views while the list is hovered (CSS). Clicking it
-// filters everything else to that page (or clears the filter).
+// A page with a sparkline of its daily views, its views and its new visitors.
+// Clicking it filters everything else to that page (or clears the filter).
 function PageItem(props: {
   page: PageRow;
   days: number[];
@@ -435,12 +429,6 @@ function PageItem(props: {
     >
       {/* "/posts/x/" shows as "posts/x"; the home page stays "/". */}
       <span class="label path">{props.page.path.replace(/^\/+|\/+$/g, "") || "/"}</span>
-      <span class="num" style={{ color: theme().stats.views }}>
-        {num(props.page.views)}
-      </span>
-      <span class="num" style={{ color: theme().stats.new }}>
-        {props.page.new > 0 ? num(props.page.new) : ""}
-      </span>
       <span class="page-spark" aria-hidden="true">
         <Chart
           days={props.days}
@@ -449,6 +437,12 @@ function PageItem(props: {
           height={16}
           lineWidth={1.25}
         />
+      </span>
+      <span class="num" style={{ color: theme().stats.views }}>
+        {num(props.page.views)}
+      </span>
+      <span class="num" style={{ color: theme().stats.new }}>
+        {props.page.new > 0 ? num(props.page.new) : ""}
       </span>
     </button>
   );
