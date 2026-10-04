@@ -5,6 +5,10 @@ export type HostTotals = {
     reads: number; // views that stayed visible long enough to count as read
     visitors: number;
     devices: { desktop: number; tablet: number; mobile: number }; // visitors per device type
+    // Visitors per operating system, of the five shown, and how many have a
+    // known one at all (visitors from before it was recorded don't).
+    systems: { windows: number; mac: number; ios: number; android: number; linux: number; known: number };
+    countries: { code: string; visitors: number }[]; // ISO codes, most visitors first; unknown left out
     new: number; // visitors whose first ever hit on this host is in the period
     newBounced: number; // ...of those, ones with no other hit on this host, ever
 };
@@ -20,12 +24,13 @@ export type PageRow = {
     views: number;
     new: number; // visitors whose first ever hit on the host was this page
     daily: number[]; // views per day
+    dailyNew: number[]; // new visitors per day
 };
 
 export type HostStats = {
     totals: HostTotals;
     daily: HostDaily;
-    referrers: Referrer[]; // where views came from, by views; page filter only
+    referrers: Referrer[]; // where views came from, by new visitors then views; page filter only
     pages: PageRow[]; // by views; referrer filter only
 };
 
@@ -39,7 +44,9 @@ export type HostSummary = {
 export type Referrer = {
     domain: string; // a referring site, or "/path" of a page on this one
     visits: number; // views that came from this source
+    new: number; // visitors whose first view came from it
     daily: number[];
+    dailyNew: number[];
 };
 
 // GET /api/overview: everything for one host.
@@ -47,6 +54,7 @@ export type Overview = {
     days: number[]; // unix seconds at the start of each UTC day
     ref: string | null; // active referrer filter
     page: string | null; // active page filter (a path)
+    country: string | null; // active country filter (an ISO code)
     stats: HostStats;
 };
 

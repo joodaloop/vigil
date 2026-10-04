@@ -45,9 +45,13 @@ export function lowestPointOffset(
 // `headroom` adds empty space (px) above the plot, which still counts for
 // hovering.
 //
-// With `onHover`, hovering marks the day nearest the pointer with a line down
-// through it and dots on the lines, and reports its index; null once the
-// pointer leaves.
+// Each chart draws a placeholder day past each end, repeating the end's
+// values, so the lines run to the edges while the first and last real days
+// sit clear of them.
+//
+// With `onHover`, hovering marks the day nearest the pointer (never a
+// placeholder) with a line down through it and dots on the lines, and reports
+// its index; null once the pointer leaves.
 export function Chart(props: {
     days: number[];
     lines: Line[];
@@ -82,7 +86,7 @@ export function Chart(props: {
         if (!plot || !props.onHover || props.days.length === 0) return;
         const b = box.getBoundingClientRect();
         const over = plot.over.getBoundingClientRect();
-        const i = Math.max(0, Math.min(props.days.length - 1, plot.posToIdx(e.clientX - over.left)));
+        const i = Math.max(0, Math.min(props.days.length - 1, plot.posToIdx(e.clientX - over.left) - ends()));
         const top = over.top - b.top;
         setMark({
             x: over.left - b.left + plot.valToPos(props.days[i], "x"),
@@ -95,6 +99,19 @@ export function Chart(props: {
     function onLeave() {
         setMark(null);
         hover(null);
+    }
+
+    // Placeholder days, one before the first and one after the last: data
+    // index i is day i - 1.
+    const ends = () => (props.days.length > 0 ? 1 : 0);
+    function padded(): (number | null)[][] {
+        const days = props.days;
+        if (!ends()) return [days, ...props.lines.map((l) => l.values)];
+        const step = days.length > 1 ? days[1] - days[0] : 86400;
+        return [
+            [days[0] - step, ...days, days[days.length - 1] + step],
+            ...props.lines.map((l) => [l.values[0], ...l.values, l.values[l.values.length - 1]]),
+        ];
     }
 
     function build() {
@@ -122,7 +139,7 @@ export function Chart(props: {
                 cursor: { show: false },
                 select: { show: false, left: 0, top: 0, width: 0, height: 0 },
             },
-            [props.days, ...props.lines.map((l) => l.values)] as uPlot.AlignedData,
+            padded() as uPlot.AlignedData,
             el,
         );
     }

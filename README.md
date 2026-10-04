@@ -117,7 +117,3 @@ gitignored, put your values there, and deploy with:
 ```sh
 pnpm run deploy:prod
 ```
-
-Search: DuckDuckGo, Brave Search, Ecosia
-- Communities and newsletters: Lobsters
-- AI tools: Perplexity, Claude

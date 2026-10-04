@@ -68,17 +68,24 @@ export async function handleHit(request: Request, env: Env): Promise<Response> {
     else if (refHost) source = canonicalSource(refHost.replace(/^www\./, ""));
     const ua = new UAParser(request.headers.get("user-agent") ?? undefined);
     const visitorId = (await readVisitor(request, env.COOKIE_SECRET)) ?? newVisitorId();
+    const country = TZ_COUNTRY[body.tz ?? ""] ?? null;
 
     // The id is the highest so far plus one, and ts is set by the database,
-    // so id order is time order.
+    // so id order is time order. The hit's country is its reader's, as kept
+    // on their visitors row; on their first hit (is_new, when they have no
+    // row yet), the one from this timezone.
     const results = await env.DB.batch<{ id: number }>([
         env.DB.prepare(
-            `INSERT INTO hits (host, page, visitor_id, source, utm_source) VALUES (?, ?, ?, ?, ?) RETURNING id`,
-        ).bind(host, path, visitorId, source, clean(body.us, 200)),
+            `INSERT INTO hits (host, page, visitor_id, source, utm_source, country, is_new)
+             VALUES (?1, ?2, ?3, ?4, ?5,
+                     IFNULL((SELECT IFNULL(country, '') FROM visitors WHERE host = ?1 AND id = ?3), IFNULL(?6, '')),
+                     NOT EXISTS (SELECT 1 FROM visitors WHERE host = ?1 AND id = ?3))
+             RETURNING id`,
+        ).bind(host, path, visitorId, source, clean(body.us, 200), country),
         env.DB.prepare(COUNT_VIEW),
         // Kept on the visitor if this is their first hit on the host.
         env.DB.prepare(COUNT_VISITOR).bind(
-            TZ_COUNTRY[body.tz ?? ""] ?? null,
+            country,
             ua.getBrowser().name ?? null,
             ua.getOS().name ?? null,
             ua.getDevice().type ?? "desktop",

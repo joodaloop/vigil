@@ -16,6 +16,7 @@
     },
     "dependencies": {
         "@solidjs/web": "2.0.0-rc.13",
+        "flag-icons": "^7.5.0",
         "solid-js": "2.0.0-rc.13",
         "ua-parser-js": "^1.0.38",
         "uplot": "^1.6.32"
