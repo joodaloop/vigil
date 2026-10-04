@@ -266,12 +266,12 @@ function Stats(props: {
             </div>
             <div class="total" style={{ color: theme.stats.new }}>
               <div class="big">{num(shown("new"))}</div>
-              <div class="big-label">New visitors</div>
+              <div class="big-label">New devices</div>
               {/* Only known for the whole period, so it stays put while a day
                   is hovered. */}
               <div class="sub">
                 <span
-                  title={`Bounced: ${num(t().newBounced)} new visitors viewed one page and never came back`}
+                  title={`Bounced: ${num(t().newBounced)} devices that opened one page and never came back`}
                 >
                   {pct(t().newBounced, t().new)}% bounce
                 </span>
@@ -531,7 +531,7 @@ function People(props: {
           <div class="beside">
             <div class="total" style={{ color: theme.stats.visitors }}>
               <div class="big">{num(t().visitors)}</div>
-              <div class="big-label">Visitors</div>
+              <div class="big-label">Devices</div>
             </div>
             {/* Each column most common first. */}
             <div class="sub stacked icons devices">

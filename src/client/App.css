@@ -259,6 +259,11 @@ select option {
   margin-bottom: 1rem;
 }
 
+.stats-head .totals {
+  gap: 1.5rem;
+  text-align: right;
+}
+
 /* Visitors, under the lists: their numbers and countries at either end,
    then their chart running to the panel's edges like the main one. */
 .people {
@@ -321,7 +326,6 @@ select option {
 
 .totals {
   display: flex;
-  gap: 2.5rem;
 }
 
 /* Each big number's block. Fixed width, left-aligned, so the totals (and the
@@ -332,6 +336,7 @@ select option {
 
 .total .sub {
   font-weight: 600;
+  display: block;
 }
 
 /* The number sits close over its label. */
