@@ -81,6 +81,12 @@ export function App(props: { sites: Site[] }) {
   // refetched when the period changes.
   const days = createMemo(() => query().days);
   const summaries = createMemo(() => get<HostSummaries>("/api/hosts", { days: String(days()) }));
+  // The sidebar's hosts, most views in the period first (ties keep site order).
+  const byViews = createMemo(() => {
+    const hosts = summaries().hosts;
+    const views = (h: Site) => hosts[h.host]?.totals.views ?? 0;
+    return [...HOSTS].sort((a, b) => views(b) - views(a));
+  });
   // A new query is on its way: the panel fades a little until it lands.
   const updating = () => isPending(() => view());
 
@@ -118,7 +124,7 @@ export function App(props: { sites: Site[] }) {
 
           {/* One entry per host; the open one is shown in full on the right. */}
           <Errored fallback={<p class="muted">Couldn't load hosts</p>}>
-            <For each={HOSTS}>
+            <For each={byViews()}>
               {(h) => {
                 const s = () => summaries().hosts[h.host];
                 // Marked as soon as it's picked, ahead of its stats.
@@ -525,8 +531,9 @@ function People(props: {
             <div class="sub stacked icons devices">
               <For each={[...DEVICES].sort((a, b) => devices()[b.key] - devices()[a.key])}>
                 {(d) => (
-                  <span title={d.name}>
-                    <DeviceIcon w={d.w} h={d.h} /> {pct(devices()[d.key], t().visitors)}%
+                  <span title={`${d.name}: ${pct(devices()[d.key], t().visitors)}%`}>
+                    <DeviceIcon w={d.w} h={d.h} />
+                    <Bar part={devices()[d.key]} whole={t().visitors} />
                   </span>
                 )}
               </For>
@@ -535,8 +542,9 @@ function People(props: {
             <div class="sub stacked icons systems">
               <For each={[...SYSTEMS].sort((a, b) => t().systems[b[0]] - t().systems[a[0]])}>
                 {([key, name]) => (
-                  <span title={name}>
-                    <OsIcon name={key} /> {pct(t().systems[key], t().systems.known)}%
+                  <span title={`${name}: ${pct(t().systems[key], t().systems.known)}%`}>
+                    <OsIcon name={key} />
+                    <Bar part={t().systems[key]} whole={t().systems.known} />
                   </span>
                 )}
               </For>
@@ -558,6 +566,17 @@ function People(props: {
         lineWidth={2}
       />
     </div>
+  );
+}
+
+// A share as a bar, filled to that fraction of its width.
+function Bar(props: { part: number; whole: number }) {
+  return (
+    <span
+      class="bar"
+      style={{ "--fill": props.whole > 0 ? props.part / props.whole : 0 }}
+      aria-hidden="true"
+    />
   );
 }
 
@@ -585,8 +604,8 @@ const flag = (code: string) =>
   FLAGS[`../../node_modules/flag-icons/flags/4x3/${code.toLowerCase()}.svg`];
 const countryName = new Intl.DisplayNames(["en"], { type: "region" });
 
-// A row of flags for the countries visitors came from, each sized by its
-// visitors relative to the top one. Clicking one filters everything else to
+// A row of flags for the countries visitors came from, each with an area
+// proportional to its visitors relative to the top one (at least 8px tall). Clicking one filters everything else to
 // that country (or clears the filter); the picked one stays listed.
 function Countries(props: {
   countries: { code: string; visitors: number }[];
@@ -620,7 +639,7 @@ function Countries(props: {
               <img
                 src={flag(c.code)}
                 alt={name()}
-                height={Math.round(14 + 26 * Math.sqrt(c.visitors / shown()[0].visitors))}
+                height={Math.max(8, Math.round(40 * Math.sqrt(c.visitors / shown()[0].visitors)))}
               />
             </button>
           );

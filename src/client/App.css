@@ -389,15 +389,25 @@ select option {
 }
 
 /* Icons differ in width, so give them a fixed column to keep the numbers aligned. */
-.icons span {
+.icons > span {
   display: grid;
   grid-template-columns: 1.1rem auto;
   align-items: center;
+  min-height: 1lh; /* a line of text tall, as when these held percentages */
   gap: 0.3rem;
 }
 
 .icons svg {
   justify-self: center;
+}
+
+/* A share's bar: a track, filled from the left in the visitors' colour. */
+.bar {
+  width: 2rem;
+  height: 0.7rem;
+  background:
+    linear-gradient(var(--visitors), var(--visitors)) no-repeat 0 / calc(var(--fill) * 100%) 100%,
+    color-mix(in srgb, var(--visitors) 15%, transparent);
 }
 
 /* ---- Lists ---- */
@@ -565,7 +575,7 @@ select option {
   flex-wrap: wrap;
   min-height: var(--square); /* one row of squares, kept even when there are none */
   padding: 0 var(--border) var(--border) 0; /* room for the last overlaps */
-  margin-top: 1.1rem;
+  margin-top: 1rem;
 }
 
 .pager button {
