@@ -25,7 +25,9 @@ const chartPadding = (lineWidth: number) => Math.ceil(lineWidth);
 //
 // With `onHover`, hovering marks the day nearest the pointer (never a
 // placeholder) with a line down through it and dots on the lines, and reports
-// its index; null once the pointer leaves.
+// its index; null once the pointer leaves. Clicking pins the day: it stays
+// marked and reported, whatever the pointer does, until another day is
+// clicked (pinning that one instead) or it is clicked again.
 export function Chart(props: {
     days: number[];
     lines: Line[];
@@ -41,6 +43,8 @@ export function Chart(props: {
     let plot: uPlot | undefined;
     // The hovered day, so moving within it doesn't report it again.
     let hovered: number | null = null;
+    // The day pinned by a click, if any.
+    const [pinned, setPinned] = createSignal<number | null>(null);
     // Where the hovered day is drawn, in px from the chart's top left: its x,
     // a dot per line, and how far the plot's baseline is above the chart's
     // bottom edge (its padding), where the day's line stops.
@@ -56,23 +60,67 @@ export function Chart(props: {
         props.onHover?.(i);
     }
 
-    function onMove(e: PointerEvent) {
-        if (!plot || !props.onHover || props.days.length === 0) return;
+    // Marks day i, as drawn by `u`.
+    function markDay(u: uPlot, i: number) {
         const b = box.getBoundingClientRect();
-        const over = plot.over.getBoundingClientRect();
-        const i = Math.max(0, Math.min(props.days.length - 1, plot.posToIdx(e.clientX - over.left) - ends()));
+        const over = u.over.getBoundingClientRect();
         const top = over.top - b.top;
         setMark({
-            x: over.left - b.left + plot.valToPos(props.days[i], "x"),
-            dots: props.lines.map((l) => ({ y: top + plot!.valToPos(l.values[i] ?? 0, l.scale), color: l.color })),
+            x: over.left - b.left + u.valToPos(props.days[i], "x"),
+            dots: props.lines.map((l) => ({ y: top + u.valToPos(l.values[i] ?? 0, l.scale), color: l.color })),
             base: b.bottom - over.bottom,
         });
+    }
+
+    // The day nearest the pointer, never a placeholder.
+    function dayAt(u: uPlot, e: MouseEvent) {
+        const over = u.over.getBoundingClientRect();
+        return Math.max(0, Math.min(props.days.length - 1, u.posToIdx(e.clientX - over.left) - ends()));
+    }
+
+    function onMove(e: MouseEvent) {
+        if (!plot || !props.onHover || props.days.length === 0 || pinned() !== null) return;
+        const i = dayAt(plot, e);
+        markDay(plot, i);
         hover(i);
     }
 
     function onLeave() {
+        if (pinned() !== null) return;
         setMark(null);
         hover(null);
+    }
+
+    // Pins the day clicked (moving the pin there if another is pinned), or
+    // if it's the pinned one, unpins it and goes back to following the
+    // pointer. The day is the click's own, as a tap has already cleared the
+    // hover.
+    function onClick(e: MouseEvent) {
+        if (!plot || !props.onHover || props.days.length === 0) return;
+        const i = dayAt(plot, e);
+        if (pinned() === i) {
+            setPinned(null);
+            onMove(e);
+        } else {
+            setPinned(i);
+            markDay(plot, i);
+            hover(i);
+        }
+    }
+
+    // After every redraw (new data, a resize), the pinned day is re-marked
+    // where it now is, or unpinned if the days no longer reach it.
+    function redrawn(u: uPlot) {
+        const i = pinned();
+        if (i === null) return;
+        if (i < props.days.length) {
+            markDay(u, i);
+            hover(i);
+        } else {
+            setPinned(null);
+            setMark(null);
+            hover(null);
+        }
     }
 
     // Placeholder days, one before the first and one after the last: data
@@ -117,6 +165,7 @@ export function Chart(props: {
                 axes: [{ show: false }, { show: false }],
                 legend: { show: false },
                 cursor: { show: false },
+                hooks: { draw: [redrawn] },
                 select: { show: false, left: 0, top: 0, width: 0, height: 0 },
             },
             padded() as uPlot.AlignedData,
@@ -142,7 +191,7 @@ export function Chart(props: {
     return (
         <div
             ref={box}
-            class={["chart", { hoverable: !!props.onHover }]}
+            class={["chart", { hoverable: !!props.onHover, pinned: pinned() !== null }]}
             style={{ height: `${height()}px` }}
             // Touch: a finger down shows its day, dragging sideways moves
             // through days, lifting it (or a scroll taking over) clears it.
@@ -150,6 +199,7 @@ export function Chart(props: {
             onPointerMove={onMove}
             onPointerLeave={onLeave}
             onPointerCancel={onLeave}
+            onClick={onClick}
         >
             <div ref={el} class="chart-plot" />
             <Show when={mark()}>

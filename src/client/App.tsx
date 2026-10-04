@@ -1,4 +1,15 @@
-import { createMemo, createSignal, Errored, For, isPending, latest, Loading, Show } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  Errored,
+  For,
+  isPending,
+  latest,
+  Loading,
+  Show,
+  untrack,
+} from "solid-js";
 import type { JSX } from "@solidjs/web";
 import type { HostStats, HostSummaries, Overview, PageRow, Referrer, Site } from "../shared/types";
 import { Chart } from "./Chart";
@@ -26,7 +37,8 @@ function initialQuery(hosts: Site[]): Query {
     host: hosts.some((h) => h.host === host) ? host! : hosts[0].host,
     days: PERIODS.includes(n) ? n : DEFAULT_PERIOD,
     ref: params.get("ref") || null,
-    page: params.get("page") || null,
+    // Only one of ref and page at a time; an old link with both keeps ref.
+    page: (!params.get("ref") && params.get("page")) || null,
     country: params.get("country") || null,
   };
 }
@@ -192,10 +204,12 @@ export function App(props: { sites: Site[] }) {
               host={view().q.host}
               stats={view().overview.stats}
               days={view().overview.days}
+              // A referrer and a page can't both be filters: picking one
+              // clears the other. The country combines with either.
               activeRef={view().q.ref}
-              onSelectRef={(ref) => update({ ref })}
+              onSelectRef={(ref) => update({ ref, page: null })}
               activePage={view().q.page}
-              onSelectPage={(page) => update({ page })}
+              onSelectPage={(page) => update({ page, ref: null })}
               activeCountry={view().q.country}
               onSelectCountry={(country) => update({ country })}
             />
@@ -227,11 +241,15 @@ function Stats(props: {
     for (const p of props.stats.pages) for (const v of p.daily) if (v > max) max = v;
     return { count: max };
   };
-  // Every page's views together (the day's while one is hovered), for each
-  // page's share.
+  // Every page's views and new visitors together (the day's while one is
+  // hovered), for each page's shares.
   const pageTotal = () => {
     const i = day();
     return props.stats.pages.reduce((n, p) => n + (i === null ? p.views : p.daily[i]), 0);
+  };
+  const pageNewTotal = () => {
+    const i = day();
+    return props.stats.pages.reduce((n, p) => n + (i === null ? p.new : p.dailyNew[i]), 0);
   };
   // The day hovered on the chart, whose numbers replace the period's.
   const [day, setDay] = createSignal<number | null>(null);
@@ -300,14 +318,22 @@ function Stats(props: {
       </div>
 
       <div class="lists">
-        <div class="pages">
-          <Paged items={byDay(props.stats.pages, day(), (p) => p.views)} first={day() !== null}>
+        {/* While a page is the filter, the list stays as it was when it was
+            picked, and only that page shows its numbers. */}
+        <div class={["pages", { filtered: props.activePage !== null }]}>
+          <Paged
+            items={byDay(props.stats.pages, day(), (p) => p.views)}
+            first={day() !== null}
+            frozen={props.activePage !== null}
+            key={(p) => p.path}
+          >
             {(page) => (
               <PageItem
                 page={page}
                 days={props.days}
                 day={day()}
                 total={pageTotal()}
+                newTotal={pageNewTotal()}
                 max={pageMax()}
                 active={props.activePage === page.path}
                 onSelect={props.onSelectPage}
@@ -362,30 +388,36 @@ function Referrers(props: {
     return { count: max };
   };
   // A referrer's views and new visitors (the day's while one is hovered),
-  // and every referrer's new visitors together, for its share.
+  // and every referrer's of each together, for its shares.
   const views = (r: Referrer) => (props.day === null ? r.visits : r.daily[props.day]);
   const fresh = (r: Referrer) => (props.day === null ? r.new : r.dailyNew[props.day]);
   const total = () => props.items.reduce((n, r) => n + fresh(r), 0);
+  const viewsTotal = () => props.items.reduce((n, r) => n + views(r), 0);
 
   return (
-    <div class="referrers">
-      <Paged items={byNewOnDay(props.items, props.day)} first={props.day !== null}>
+    // While a referrer is the filter, the list stays as it was when it was
+    // picked, and only that referrer shows its numbers.
+    <div class={["referrers", { filtered: props.active !== null }]}>
+      <Paged
+        items={byNewOnDay(props.items, props.day)}
+        first={props.day !== null}
+        frozen={props.active !== null}
+        key={(r) => r.domain}
+      >
         {(r) => {
           const on = () => props.active === r.domain;
           return (
-            <div
+            <button
               class={["referrer", { active: on() }]}
               style={{ "--share": share(fresh(r), total()) }}
+              title={on() ? "Clear filter" : `Only views that came from ${r.domain}`}
+              aria-pressed={on() ? "true" : "false"}
+              onClick={() => props.onSelect(on() ? null : r.domain)}
             >
-              <button
-                class="ref-name"
-                title={on() ? "Clear filter" : `Only views that came from ${r.domain}`}
-                aria-pressed={on() ? "true" : "false"}
-                onClick={() => props.onSelect(on() ? null : r.domain)}
-              >
+              <span class="ref-name">
                 <SourceIcon name={referrerIcon(r.domain)} />
                 <span class="ref-label">{referrerName(r.domain)}</span>
-              </button>
+              </span>
               {/* A sparkline of its daily views, then its views and new visitors. */}
               <span class="ref-count" style={{ color: theme.stats.views }}>
                 <span class="ref-spark" aria-hidden="true">
@@ -397,12 +429,14 @@ function Referrers(props: {
                     lineWidth={1.25}
                   />
                 </span>
-                <span class="ref-num">{num(views(r))}</span>
+                <span class="ref-num">
+                  <Count n={views(r)} total={viewsTotal()} />
+                </span>
                 <span class="ref-num" style={{ color: theme.stats.new }}>
-                  {fresh(r) > 0 ? num(fresh(r)) : ""}
+                  <Count n={fresh(r)} total={total()} blankZero />
                 </span>
               </span>
-            </div>
+            </button>
           );
         }}
       </Paged>
@@ -415,19 +449,47 @@ function Referrers(props: {
 // there are.
 // `first` shows the first page without forgetting the one picked, e.g. while
 // a day is hovered and the list is ranked by it.
+// `frozen` holds the list as it was last shown, rows, order and page, e.g.
+// while one of its rows is the filter, so new data can't move it. Each row
+// still takes its latest data, matched by `key`; one no longer in `items`
+// keeps what it had. Once it's thawed, the list stays on that page.
 // The page buttons are one tab stop, the current page's: arrow keys, Home
 // and End move between pages from there.
 function Paged<T>(props: {
   items: T[];
   size?: number;
   first?: boolean;
+  frozen?: boolean;
+  key: (item: T) => string;
   children: (item: T) => JSX.Element;
 }) {
   const size = () => props.size ?? 10;
   const [page, setPage] = createSignal(0);
-  const pages = () => Math.max(1, Math.ceil(props.items.length / size()));
+  // The rows and page last shown unfrozen, which freezing keeps. (Frozen
+  // from the start, e.g. a filter in the link, it keeps the first rows.)
+  let lastItems: T[] = [];
+  let lastPage = 0;
+  const held = createMemo(() =>
+    props.frozen
+      ? { items: lastItems.length ? lastItems : untrack(() => props.items), page: lastPage }
+      : null,
+  );
+  createEffect(held, (h) => {
+    if (h) setPage(h.page);
+  });
+  const items = createMemo(() => {
+    const h = held();
+    if (!h) return (lastItems = props.items);
+    const byKey = new Map(props.items.map((item) => [props.key(item), item]));
+    return h.items.map((item) => byKey.get(props.key(item)) ?? item);
+  });
+  const pages = () => Math.max(1, Math.ceil(items().length / size()));
   // Stay in range when the list shrinks (new period, filter or site).
-  const current = () => (props.first ? 0 : Math.min(page(), pages() - 1));
+  const current = () => {
+    const h = held();
+    if (h) return h.page;
+    return (lastPage = props.first ? 0 : Math.min(page(), pages() - 1));
+  };
   const start = () => current() * size();
   const onKeyDown = (e: KeyboardEvent & { currentTarget: HTMLElement }) => {
     const to = {
@@ -448,7 +510,7 @@ function Paged<T>(props: {
   return (
     <>
       <div class="paged" style={{ "--rows": size() }}>
-        <For each={props.items.slice(start(), start() + size())}>
+        <For each={items().slice(start(), start() + size())}>
           {(item) => props.children(item)}
         </For>
       </div>
@@ -478,6 +540,7 @@ function PageItem(props: {
   days: number[];
   day: number | null; // hovered on the main chart: show that day's numbers
   total: number; // every page's views, for this one's share
+  newTotal: number; // every page's new visitors, for this one's share of them
   max: Record<string, number>;
   active: boolean;
   onSelect: (page: string | null) => void;
@@ -507,15 +570,33 @@ function PageItem(props: {
         />
       </span>
       <span class="num" style={{ color: theme.stats.views }}>
-        {num(props.day === null ? props.page.views : props.page.daily[props.day])}
+        <Count
+          n={props.day === null ? props.page.views : props.page.daily[props.day]}
+          total={props.total}
+        />
       </span>
       <span class="num" style={{ color: theme.stats.new }}>
-        {(() => {
-          const n = props.day === null ? props.page.new : props.page.dailyNew[props.day];
-          return n > 0 ? num(n) : "";
-        })()}
+        <Count
+          n={props.day === null ? props.page.new : props.page.dailyNew[props.day]}
+          total={props.newTotal}
+          blankZero
+        />
       </span>
     </button>
+  );
+}
+
+// A list's number, with its share of the list's total in the same place,
+// shown instead while the list is hovered. `blankZero` leaves both empty
+// for none.
+function Count(props: { n: number; total: number; blankZero?: boolean }) {
+  return (
+    <Show when={!props.blankZero || props.n > 0}>
+      <span class="count">
+        <span class="n">{num(props.n)}</span>
+        <span class="pct">{pct(props.n, props.total)}%</span>
+      </span>
+    </Show>
   );
 }
 
@@ -557,7 +638,7 @@ function People(props: {
                 {(d) => (
                   <span title={`${d.name}: ${pct(devices()[d.key], t().visitors)}%`}>
                     <DeviceIcon w={d.w} h={d.h} />
-                    <Bar part={devices()[d.key]} whole={t().visitors} />
+                    <Share part={devices()[d.key]} whole={t().visitors} />
                   </span>
                 )}
               </For>
@@ -568,7 +649,7 @@ function People(props: {
                 {([key, name]) => (
                   <span title={`${name}: ${pct(t().systems[key], t().systems.known)}%`}>
                     <OsIcon name={key} />
-                    <Bar part={t().systems[key]} whole={t().systems.known} />
+                    <Share part={t().systems[key]} whole={t().systems.known} />
                   </span>
                 )}
               </For>
@@ -593,14 +674,18 @@ function People(props: {
   );
 }
 
-// A share as a bar, filled to that fraction of its width.
-function Bar(props: { part: number; whole: number }) {
+// A share as a bar, filled to that fraction of its width, with its percentage
+// in the same place, shown instead while the devices and systems are hovered.
+function Share(props: { part: number; whole: number }) {
   return (
-    <span
-      class="bar"
-      style={{ "--fill": props.whole > 0 ? props.part / props.whole : 0 }}
-      aria-hidden="true"
-    />
+    <>
+      <span
+        class="bar"
+        style={{ "--fill": props.whole > 0 ? props.part / props.whole : 0 }}
+        aria-hidden="true"
+      />
+      <span class="pct">{pct(props.part, props.whole)}%</span>
+    </>
   );
 }
 

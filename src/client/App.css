@@ -106,8 +106,13 @@ main {
   top: 0;
   width: var(--day-line);
   margin-left: calc(var(--day-line) / -2);
-  background: var(--muted);
+  background: var(--text);
   pointer-events: none;
+}
+
+/* A day pinned by a click has a heavier line, so it reads as held. */
+.chart.pinned {
+  --day-line: 2px;
 }
 
 /* A dot on each line at the hovered day, centred on it. */
@@ -405,6 +410,27 @@ select option {
     color-mix(in srgb, var(--visitors) 15%, transparent);
 }
 
+/* A share's percentage, in its bar's cell. Hidden rather than removed, so the
+   column keeps its width either way; hovering the visitors number or
+   either column swaps the bars for the percentages. */
+.icons .bar,
+.icons .pct {
+  grid-area: 1 / 2;
+}
+
+.icons .pct {
+  visibility: hidden;
+  color: var(--visitors);
+}
+
+.totals:hover .icons .bar {
+  visibility: hidden;
+}
+
+.totals:hover .icons .pct {
+  visibility: visible;
+}
+
 /* ---- Lists ---- */
 
 /* Pages and referrers side by side, under the chart: 20rem each at most,
@@ -499,17 +525,14 @@ select option {
   flex-direction: column;
 }
 
-/* A referrer: its name (click to filter), then its visits. The name is the
-   button, so it takes the row's padding on the left, above and below, and
-   its own on the right comes out of the gap. */
+/* A referrer: its name, then its visits, all one button (click to filter). */
 .referrer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: calc(1rem - var(--row-x));
+  gap: 1rem;
+  width: 100%;
   min-width: 0;
-  padding-block: 0;
-  padding-left: 0;
 }
 
 /* An icon, then the name, cut short if it has to be. */
@@ -518,7 +541,6 @@ select option {
   align-items: center;
   gap: 0.4rem;
   min-width: 0;
-  padding: var(--row-pad) var(--row-x);
 }
 
 .ref-icon {
@@ -542,6 +564,32 @@ select option {
   text-align: right;
 }
 
+/* A list's number and its percentage, one over the other, the percentage
+   hidden until the list is hovered, unless the list is filtered. Hidden
+   rather than removed, so the column keeps its width either way. */
+.count {
+  display: inline-grid;
+  justify-items: end;
+}
+
+.count > * {
+  grid-area: 1 / 1;
+}
+
+.count .pct {
+  visibility: hidden;
+}
+
+.pages:not(.filtered):hover .count .n,
+.referrers:not(.filtered):hover .count .n {
+  visibility: hidden;
+}
+
+.pages:not(.filtered):hover .count .pct,
+.referrers:not(.filtered):hover .count .pct {
+  visibility: visible;
+}
+
 .page-spark,
 .ref-spark {
   display: flex;
@@ -550,18 +598,34 @@ select option {
 }
 
 /* While a list's filter is on, its picked row is bold and the rest are
-   muted, numbers included (their colours are inline, hence !important). */
+   just their names, muted. Their sparklines and numbers are hidden rather
+   than removed, so the rows keep their layout; no row, picked or not, has
+   its share bar. */
 .row.active,
 .referrer.active {
   font-weight: 600;
 }
 
-.pages:has(.active) .row:not(.active),
-.pages:has(.active) .row:not(.active) .num,
-.referrers:has(.active) .referrer:not(.active),
-.referrers:has(.active) .referrer:not(.active) .ref-count,
-.referrers:has(.active) .referrer:not(.active) .ref-num {
-  color: var(--muted) !important;
+.pages.filtered .row:not(.active),
+.referrers.filtered .referrer:not(.active) {
+  color: var(--muted);
+}
+
+.pages.filtered .row:not(.active) :is(.page-spark, .num),
+.referrers.filtered .referrer:not(.active) .ref-count {
+  visibility: hidden;
+}
+
+.pages.filtered .row::before,
+.referrers.filtered .referrer::before {
+  content: none;
+}
+
+/* Nor can its pages be changed: it stays on the picked row's. Hidden rather
+   than removed, so the list keeps its height. */
+.pages.filtered .pager,
+.referrers.filtered .pager {
+  visibility: hidden;
 }
 
 /* Page squares: one per page, the current one filled. They touch, sharing
