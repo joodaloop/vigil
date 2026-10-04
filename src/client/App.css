@@ -10,6 +10,7 @@
 
 * {
   box-sizing: border-box;
+  letter-spacing: -0.02em;
 }
 
 body {
@@ -31,6 +32,7 @@ p {
 button {
   padding: 0;
   font: inherit;
+  letter-spacing: inherit;
   color: inherit;
   text-align: left;
   background: none;
@@ -129,13 +131,11 @@ main {
   margin-bottom: 1.75rem;
   font-size: 0.9rem;
   line-height: 1.5em;
-  letter-spacing: -0.01em;
 }
 
 h1 {
   font-size: 2.4rem;
   font-weight: 600;
-  letter-spacing: -0.02em;
   line-height: 1;
   padding-bottom: 0.25em;
   margin: 0px 0px -0.25em;
@@ -271,21 +271,13 @@ select option {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 4rem;
+  gap: 2.5rem;
 }
 
 /* The visitors number, with its devices beside it rather than under it. */
 .beside {
   display: flex;
   align-items: flex-start;
-  gap: 1.5rem;
-}
-
-/* Wide enough for "88.8k", so the columns beside it don't shift as it
-   changes. */
-.beside-num {
-  width: 4rem;
-  font-variant-numeric: tabular-nums;
 }
 
 .beside .sub {
@@ -334,17 +326,11 @@ select option {
   gap: 2.5rem;
 }
 
-/* Fixed width, left-aligned, so the totals don't shift as their numbers
-   change (e.g. while hovering days). */
+/* Each big number's block. Fixed width, left-aligned, so the totals (and the
+   columns beside Visitors) don't shift as their numbers change. */
 .total {
-  width: 4rem;
-  text-align: left;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Its label is longer. */
-.total.wide {
   width: 5.5rem;
+  text-align: left;
 }
 
 /* The number sits close over its label. */
@@ -354,12 +340,6 @@ select option {
 
 .total .sub {
   font-weight: 600;
-}
-
-/* Heavier icons, to match the bolder text. */
-.total .sub svg {
-  stroke-width: 2.5;
-  padding-top: 1px;
 }
 
 .big {
@@ -378,7 +358,6 @@ select option {
   display: flex;
   gap: 0.75rem;
   margin-top: 0.15rem;
-  letter-spacing: -0.05em;
 }
 
 /* One per line. */
@@ -386,6 +365,7 @@ select option {
   flex-direction: column;
   gap: 0.1rem;
   font-size: 0.85rem;
+  margin-right: 1.5rem;
 }
 
 /* Icons differ in width, so give them a fixed column to keep the numbers aligned. */
@@ -487,7 +467,6 @@ select option {
 .path {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.92em; /* monospace runs large next to the UI font */
-  letter-spacing: -0.03em;
   padding-right: 0.5rem; /* with the row's gap, 1rem before the sparkline */
 }
 

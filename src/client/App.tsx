@@ -252,22 +252,22 @@ function Stats(props: {
               <div class="big-label">Views</div>
               {/* Read: visible for long enough (30s unless the tracker's
                   data-read-after says otherwise). */}
-              <div class="sub icons">
+              <div class="sub">
                 <span title="Reads: views that stayed on screen long enough">
-                  <BookIcon /> {num(shown("reads"))}
+                  {num(shown("reads"))} reads
                 </span>
               </div>
             </div>
-            <div class="total wide" style={{ color: theme.stats.new }}>
+            <div class="total" style={{ color: theme.stats.new }}>
               <div class="big">{num(shown("new"))}</div>
               <div class="big-label">New visitors</div>
               {/* Only known for the whole period, so it stays put while a day
                   is hovered. */}
-              <div class="sub icons">
+              <div class="sub">
                 <span
                   title={`Bounced: ${num(t().newBounced)} new visitors viewed one page and never came back`}
                 >
-                  <BounceIcon /> {pct(t().newBounced, t().new)}%
+                  {pct(t().newBounced, t().new)}% bounce
                 </span>
               </div>
             </div>
@@ -523,7 +523,7 @@ function People(props: {
       <div class="people-head">
         <div class="totals">
           <div class="beside">
-            <div class="beside-num" style={{ color: theme.stats.visitors }}>
+            <div class="total" style={{ color: theme.stats.visitors }}>
               <div class="big">{num(t().visitors)}</div>
               <div class="big-label">Visitors</div>
             </div>
@@ -735,50 +735,6 @@ function OsIcon(props: { name: string }) {
       aria-hidden="true"
       innerHTML={ICONS[props.name]}
     />
-  );
-}
-
-// Tabler "arrow-bounce", stroked in the current text colour.
-function BounceIcon() {
-  return (
-    <svg
-      width="19"
-      height="19"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M10 18h4" />
-      <path d="M3 8a9 9 0 0 1 9 9v1l1.428 -4.285a12 12 0 0 1 6.018 -6.938l.554 -.277" />
-      <path d="M15 6h5v5" />
-    </svg>
-  );
-}
-
-// Tabler "book", stroked in the current text colour.
-function BookIcon() {
-  return (
-    <svg
-      width="19"
-      height="19"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M3 19a9 9 0 0 1 9 0a9 9 0 0 1 9 0" />
-      <path d="M3 6a9 9 0 0 1 9 0a9 9 0 0 1 9 0" />
-      <path d="M3 6l0 13" />
-      <path d="M12 6l0 13" />
-      <path d="M21 6l0 13" />
-    </svg>
   );
 }
 
