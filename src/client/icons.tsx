@@ -1,3 +1,5 @@
+import { theme } from "./theme";
+
 // Outline icons, as the markup inside each 24x24 <svg>: brands for well-known
 // sources, `link` for other sites and `file` for pages of the site itself.
 // From Tabler (tabler.io/icons, MIT), except `kagi` (the magnifier from Kagi's
@@ -42,3 +44,98 @@ export const ICONS: Record<string, string> = {
     ycombinator: "<path d=\"M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12\" /> <path d=\"M8 7l4 6l4 -6\" /> <path d=\"M12 17l0 -4\" />",
     youtube: "<path d=\"M2 8a4 4 0 0 1 4 -4h12a4 4 0 0 1 4 4v8a4 4 0 0 1 -4 4h-12a4 4 0 0 1 -4 -4v-8\" /> <path d=\"M10 9l5 3l-5 3l0 -6\" />",
 };
+
+// Each source's icon in its brand colour; black logos use the text colour.
+// Other sites' links are plain and the site's own pages use green.
+const ICON_STYLE: Record<string, { size?: number; color: () => string }> = {
+  google: { color: () => "#EA4335" },
+  bing: { color: () => "#0078D4" },
+  duckduckgo: { color: () => "#DE5833" },
+  ecosia: { color: () => "#008009" },
+  brave: { color: () => "#FB542B" },
+  yandex: { color: () => "#FC3F1D" },
+  baidu: { color: () => "#2932E1" },
+  ycombinator: { size: 18, color: () => "#FF6600" },
+  lobsters: { color: () => "#AC130D" },
+  kagi: { color: () => "#FFB318" },
+  reddit: { color: () => "#FF4500" },
+  twitter: { color: () => "#1DA1F2" },
+  bluesky: { color: () => "#1185FE" },
+  mastodon: { color: () => "#6364FF" },
+  threads: { color: () => theme.text },
+  facebook: { color: () => "#1877F2" },
+  instagram: { color: () => "#E4405F" },
+  linkedin: { color: () => "#0A66C2" },
+  youtube: { color: () => "#FF0000" },
+  github: { color: () => theme.text },
+  medium: { color: () => "#00AB6C" },
+  substack: { color: () => "#FF6719" },
+  openai: { color: () => theme.text },
+  perplexity: { color: () => "#1FB8CD" },
+  claude: { color: () => "#D97757" },
+  link: { color: () => theme.text },
+  file: { color: () => theme.stats.visitors },
+};
+
+// A source's icon (ICONS), centred in a slot as wide as the largest one,
+// so names line up whatever the icon's size.
+export function SourceIcon(props: { name: string }) {
+  const style = () => ICON_STYLE[props.name];
+  return (
+    <span class="source-icon">
+      <svg
+        width={style()?.size ?? 16}
+        height={style()?.size ?? 16}
+        style={{ color: style()?.color() }}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+        innerHTML={ICONS[props.name]}
+      />
+    </span>
+  );
+}
+
+// An operating system's icon (ICONS).
+export function OsIcon(props: { name: string }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+      innerHTML={ICONS[props.name]}
+    />
+  );
+}
+
+// A device type's icon: a screen of its shape, `w` by `h`.
+export function DeviceIcon(props: { w: number; h: number }) {
+  return (
+    <svg
+      width={props.w + 2}
+      height={props.h + 2}
+      viewBox={`0 0 ${props.w + 2} ${props.h + 2}`}
+      aria-hidden="true"
+    >
+      <rect
+        x="1"
+        y="1"
+        width={props.w}
+        height={props.h}
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+      />
+    </svg>
+  );
+}

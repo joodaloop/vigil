@@ -137,13 +137,13 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
     const bySource = new Map<string, Referrer>();
     for (const r of sources.results) {
         let s = bySource.get(r.source);
-        if (!s) bySource.set(r.source, (s = { source: r.source, visits: 0, new: 0, daily: Array(numDays).fill(0), dailyNew: Array(numDays).fill(0) }));
-        s.visits += r.views;
+        if (!s) bySource.set(r.source, (s = { source: r.source, views: 0, new: 0, daily: Array(numDays).fill(0), dailyNew: Array(numDays).fill(0) }));
+        s.views += r.views;
         s.new += r.new;
         s.daily[r.day - firstDay] = r.views;
         s.dailyNew[r.day - firstDay] = r.new;
     }
-    stats.referrers = [...bySource.values()].sort((a, b) => b.new - a.new || b.visits - a.visits);
+    stats.referrers = [...bySource.values()].sort((a, b) => b.new - a.new || b.views - a.views);
 
     for (const r of visitorsByDay?.results ?? []) stats.daily.visitors[r.day - firstDay] = r.visitors;
 

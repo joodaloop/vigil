@@ -82,7 +82,7 @@ main {
 /* ---- Charts ---- */
 
 .chart {
-  --day-line: 1px; /* the hovered day's line */
+  --day-line: 1px; /* the pinned day's line */
   --dot: 8px; /* the hovered day's dots */
   position: relative;
   width: 100%;
@@ -94,15 +94,15 @@ main {
   touch-action: pan-y;
 }
 
-/* Stacking: the hovered day's line, then the drawing (its canvas is
+/* Stacking: the pinned day's line, then the drawing (its canvas is
    see-through), then the dots. */
 .chart-plot {
   position: relative;
   z-index: 1;
 }
 
-/* A line down through the hovered day, to the baseline (`bottom` is set
-   inline). */
+/* A thin line down through the pinned day, to the baseline (`bottom` is
+   set inline). */
 .chart-day {
   position: absolute;
   top: 0;
@@ -110,11 +110,6 @@ main {
   margin-left: calc(var(--day-line) / -2);
   background: var(--text);
   pointer-events: none;
-}
-
-/* A day pinned by a click has a heavier line, so it reads as held. */
-.chart.pinned {
-  --day-line: 2px;
 }
 
 /* A dot on each line at the hovered day, centred on it. */
@@ -291,7 +286,7 @@ select option {
 /* Visitors, under the lists: their numbers and countries at either end,
    then their chart running to the panel's edges like the main one. */
 .people {
-  margin-top: 4rem;
+  margin-top: 3.5rem;
 }
 
 .people > .chart {
@@ -431,18 +426,21 @@ span.filter-flag {
   font-size: 0.9rem;
 }
 
-/* Hovering the totals, or a list, shows each .on-hover
-   in it in place of its .off-hover. Hidden rather than removed, so each
-   keeps its width either way. */
-.on-hover {
+/* Each .alt-form shows in place of its .main-form: in the top half (the
+   totals and lists) while space has switched them to percentages (.pct),
+   and in the visitors' totals while hovered. Hidden rather than removed, so
+   each keeps its width either way. */
+.alt-form {
   visibility: hidden;
 }
 
-:is(.totals, .pages, .referrers):hover .off-hover {
+.stats.pct :is(.stats-head .totals, .pages, .referrers) .main-form,
+.people .totals:hover .main-form {
   visibility: hidden;
 }
 
-:is(.totals, .pages, .referrers):hover .on-hover {
+.stats.pct :is(.stats-head .totals, .pages, .referrers) .alt-form,
+.people .totals:hover .alt-form {
   visibility: visible;
 }
 
@@ -594,14 +592,14 @@ span.filter-flag {
 }
 
 /* A referrer's icon, then its name, cut short if it has to be. */
-.ref-name {
+.source-name {
   display: flex;
   align-items: center;
   gap: 0.3rem;
   min-width: 0;
 }
 
-.ref-icon {
+.source-icon {
   display: flex;
   justify-content: center;
   flex-shrink: 0;
@@ -609,7 +607,7 @@ span.filter-flag {
   color: var(--muted);
 }
 
-/* Two forms of a number, one over the other (see .on-hover). */
+/* Two forms of a number, one over the other (see .alt-form). */
 .count {
   display: inline-grid;
   justify-items: end;
@@ -626,36 +624,42 @@ span.filter-flag {
   width: var(--spark);
 }
 
-/* Page squares: one per page, the current one filled. They touch, sharing
-   their borders: each overlaps the next by a border's width, across and
-   down when they wrap. */
+/* Page squares: one per page, to the right, the current one filled;
+   hovering another shows a small square inside it. Each button is wider than
+   its square and they touch, so the gaps between squares are clickable too. */
 .pager {
-  --square: 12px;
-  --border: 1px;
+  --slot: 15px; /* each button */
+  --square: 10px; /* the square drawn in it */
   display: flex;
   flex-wrap: wrap;
-  min-height: var(--square); /* one row of squares, kept even when there are none */
-  padding: 0 var(--border) var(--border) 0; /* room for the last overlaps */
+  justify-content: flex-end;
+  min-height: var(--slot); /* one row of squares, kept even when there are none */
   margin-top: 1rem;
+  margin-right: calc((var(--square) - var(--slot)) / 2); /* the last square's edge in line */
 }
 
 .pager button {
-  width: var(--square);
-  height: var(--square);
-  margin: 0 calc(-1 * var(--border)) calc(-1 * var(--border)) 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--slot);
+  height: var(--slot);
 }
 
 .pager button::before {
   content: "";
-  display: block;
-  width: 100%;
-  height: 100%;
+  width: var(--square);
+  height: var(--square);
   box-sizing: border-box; /* `*` doesn't reach pseudo-elements */
-  border: var(--border) solid var(--text);
+  border: 1px solid var(--text);
 }
 
 .pager button.current::before {
   background: var(--text);
+}
+
+.pager button:not(.current):hover::before {
+  background: linear-gradient(var(--text), var(--text)) center / 4px 4px no-repeat;
 }
 
 /* ---- Narrower screens ---- */

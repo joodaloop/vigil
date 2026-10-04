@@ -1,4 +1,5 @@
 import { render } from "@solidjs/web";
+import { get } from "./api";
 import { App } from "./App";
 import { applyTheme } from "./theme";
 import type { Site } from "../shared/types";
@@ -10,9 +11,7 @@ if (!root) throw new Error("Missing #root");
 applyTheme();
 
 async function start() {
-  const response = await fetch("/api/config");
-  if (!response.ok) throw new Error(`Config request failed: ${response.status}`);
-  const { sites } = (await response.json()) as { sites: Site[] };
+  const { sites } = await get<{ sites: Site[] }>("/api/config");
   if (!sites.length) throw new Error("No sites configured in SITES (wrangler.json)");
   render(() => <App sites={sites} />, root!);
 }

@@ -44,7 +44,7 @@ export type HostSummary = {
 
 export type Referrer = {
     source: string; // a referring site's domain, or "/path" of a page on this one
-    visits: number; // views that came from this source
+    views: number; // views that came from this source
     new: number; // visitors whose first view came from it
     daily: number[];
     dailyNew: number[];

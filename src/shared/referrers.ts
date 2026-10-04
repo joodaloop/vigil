@@ -1,5 +1,5 @@
 // Well-known referrers: their display name, and icon where Tabler has one
-// (client/icons.ts). Used by the collector, to record one domain per source,
+// (client/icons.tsx). Used by the collector, to record one domain per source,
 // and the dashboard, to show it.
 //
 // A domain matches its entry or any subdomain of it. `merge` records any of
@@ -69,7 +69,7 @@ export function referrerName(source: string): string {
     return known(source)?.name ?? source;
 }
 
-// The icons.ts key to show beside a source.
+// The icons.tsx key to show beside a source.
 export function referrerIcon(source: string): string {
     if (source.startsWith("/")) return "file";
     return known(source)?.icon ?? "link";
