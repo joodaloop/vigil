@@ -353,12 +353,13 @@ select option {
 /* Each big number's block. Fixed width, left-aligned, so the totals (and the
    columns beside Visitors) don't shift as their numbers change. */
 .total {
-  width: 6.2rem;
+  width: 6rem;
 }
 
 .total .sub {
   font-weight: 600;
   display: block;
+  white-space: nowrap; /* "100% engaged" is wider than the total: never a second line */
 }
 
 /* The number sits close over its label. */
@@ -371,6 +372,27 @@ select option {
 .big-label {
   margin-bottom: 0.4rem;
   font-size: 0.9rem;
+}
+
+/* Hovering the totals, or a list that isn't filtered, shows each .on-hover
+   in it in place of its .off-hover. Hidden rather than removed, so each
+   keeps its width either way. */
+.on-hover {
+  visibility: hidden;
+}
+
+:is(.totals, .pages:not(.filtered), .referrers:not(.filtered)):hover .off-hover {
+  visibility: hidden;
+}
+
+:is(.totals, .pages:not(.filtered), .referrers:not(.filtered)):hover .on-hover {
+  visibility: visible;
+}
+
+/* A total's secondary stat and its other form: a block, like the .sub it's
+   in, right-aligned like the totals. */
+.total .count {
+  display: grid;
 }
 
 /* Secondary stats under a total. */
@@ -410,25 +432,15 @@ select option {
     color-mix(in srgb, var(--visitors) 15%, transparent);
 }
 
-/* A share's percentage, in its bar's cell. Hidden rather than removed, so the
-   column keeps its width either way; hovering the visitors number or
-   either column swaps the bars for the percentages. */
+/* A share's percentage, in its bar's cell, shown instead of the bar while
+   the visitors number or either column is hovered. */
 .icons .bar,
 .icons .pct {
   grid-area: 1 / 2;
 }
 
 .icons .pct {
-  visibility: hidden;
   color: var(--visitors);
-}
-
-.totals:hover .icons .bar {
-  visibility: hidden;
-}
-
-.totals:hover .icons .pct {
-  visibility: visible;
 }
 
 /* ---- Lists ---- */
@@ -564,9 +576,7 @@ select option {
   text-align: right;
 }
 
-/* A list's number and its percentage, one over the other, the percentage
-   hidden until the list is hovered, unless the list is filtered. Hidden
-   rather than removed, so the column keeps its width either way. */
+/* Two forms of a number, one over the other (see .on-hover). */
 .count {
   display: inline-grid;
   justify-items: end;
@@ -576,20 +586,6 @@ select option {
   grid-area: 1 / 1;
 }
 
-.count .pct {
-  visibility: hidden;
-}
-
-.pages:not(.filtered):hover .count .n,
-.referrers:not(.filtered):hover .count .n {
-  visibility: hidden;
-}
-
-.pages:not(.filtered):hover .count .pct,
-.referrers:not(.filtered):hover .count .pct {
-  visibility: visible;
-}
-
 .page-spark,
 .ref-spark {
   display: flex;
@@ -597,13 +593,18 @@ select option {
   width: var(--spark);
 }
 
-/* While a list's filter is on, its picked row is bold and the rest are
-   just their names, muted. Their sparklines and numbers are hidden rather
-   than removed, so the rows keep their layout; no row, picked or not, has
-   its share bar. */
+/* While a list's filter is on, its rows are just their names: the picked
+   one bold, the rest muted. Their sparklines and numbers are hidden rather
+   than removed, so the rows keep their layout, and none has its share bar. */
 .row.active,
 .referrer.active {
   font-weight: 600;
+}
+
+/* A row that isn't picked lightens while hovered, numbers and bar too. */
+.row:not(.active):hover,
+.referrer:not(.active):hover {
+  opacity: 0.65;
 }
 
 .pages.filtered .row:not(.active),
@@ -611,8 +612,8 @@ select option {
   color: var(--muted);
 }
 
-.pages.filtered .row:not(.active) :is(.page-spark, .num),
-.referrers.filtered .referrer:not(.active) .ref-count {
+.pages.filtered .row :is(.page-spark, .num),
+.referrers.filtered .referrer .ref-count {
   visibility: hidden;
 }
 

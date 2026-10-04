@@ -27,7 +27,8 @@ const chartPadding = (lineWidth: number) => Math.ceil(lineWidth);
 // placeholder) with a line down through it and dots on the lines, and reports
 // its index; null once the pointer leaves. Clicking pins the day: it stays
 // marked and reported, whatever the pointer does, until another day is
-// clicked (pinning that one instead) or it is clicked again.
+// clicked (pinning that one instead), it is clicked again, or the days
+// change (another period, or the next day arriving).
 export function Chart(props: {
     days: number[];
     lines: Line[];
@@ -43,8 +44,10 @@ export function Chart(props: {
     let plot: uPlot | undefined;
     // The hovered day, so moving within it doesn't report it again.
     let hovered: number | null = null;
-    // The day pinned by a click, if any.
+    // The day pinned by a click, if any, and the days it was pinned among.
     const [pinned, setPinned] = createSignal<number | null>(null);
+    let pinnedAmong = "";
+    const daysKey = () => `${props.days[0]}:${props.days.length}`;
     // Where the hovered day is drawn, in px from the chart's top left: its x,
     // a dot per line, and how far the plot's baseline is above the chart's
     // bottom edge (its padding), where the day's line stops.
@@ -103,17 +106,18 @@ export function Chart(props: {
             onMove(e);
         } else {
             setPinned(i);
+            pinnedAmong = daysKey();
             markDay(plot, i);
             hover(i);
         }
     }
 
     // After every redraw (new data, a resize), the pinned day is re-marked
-    // where it now is, or unpinned if the days no longer reach it.
+    // where it now is, or unpinned if the days have changed.
     function redrawn(u: uPlot) {
         const i = pinned();
         if (i === null) return;
-        if (i < props.days.length) {
+        if (daysKey() === pinnedAmong) {
             markDay(u, i);
             hover(i);
         } else {
