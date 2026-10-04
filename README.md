@@ -8,6 +8,8 @@ I have long felt the need a free service that can tell me...
 
 Vigil is a cookie-based analytics service (and pretty dashboard) that tries to answer those questions as best as possible with minimal fuss.
 
+![Screenshot of demo dashboard](/screenshot.png)
+
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/joodaloop/vigil)
 
 ## How it works
