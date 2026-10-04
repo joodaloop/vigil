@@ -286,7 +286,7 @@ select option {
 /* Visitors, under the lists: their numbers and countries at either end,
    then their chart running to the panel's edges like the main one. */
 .people {
-  margin-top: 3.5rem;
+  margin-top: 2.5rem;
 }
 
 .people > .chart {
