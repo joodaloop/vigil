@@ -366,6 +366,18 @@ function Stats(props: {
   const maxes = createMemo(() => ({
     count: peak(props.host, Math.max(0, ...props.stats.daily.views)),
   }));
+  // One scale for every sparkline in both lists (across all their pages),
+  // the largest day of any row seen on the host's lists yet, so their
+  // heights compare, within a list, across the two, and with other periods'
+  // and filters'. From the stats before any day is hovered (the same rows'
+  // days), and a number first, so hovering leaves it, and the sparklines, be.
+  const listTop = createMemo(() => {
+    let max = 0;
+    for (const x of [...props.stats.pages, ...props.stats.referrers])
+      for (const v of x.daily) if (v > max) max = v;
+    return peak(`${props.host} lists`, max);
+  });
+  const listMaxes = createMemo(() => ({ count: listTop() }));
   // "." switches the numbers to percentages and back, "," the lists' names
   // to their addresses and paths and back, "/" engaged mode on and off,
   // Backspace clears every filter, "[" and "]" pick the period before and
@@ -525,7 +537,7 @@ function Stats(props: {
         <Pages
           items={shown().pages}
           rows={props.rows.pages}
-          host={props.host}
+          maxes={listMaxes()}
           days={props.days}
           engaged={props.engaged}
           picked={props.filters.page}
@@ -533,6 +545,7 @@ function Stats(props: {
         />
         <Referrers
           items={shown().referrers}
+          maxes={listMaxes()}
           rows={props.rows.referrers}
           host={props.host}
           icon={props.icon}

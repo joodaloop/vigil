@@ -858,7 +858,7 @@ select option {
 
 /* Without a fine pointer (a mouse or trackpad), page buttons big enough to
    tap. */
-@media not (pointer: fine) {
+@media not all and (pointer: fine) {
   .pager {
     --slot: 28px;
     font-size: 0.9375rem;

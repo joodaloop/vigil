@@ -31,6 +31,10 @@ export function People(props: {
   // number first, so hovering a day (new stats, the same days) leaves it be.
   const top = createMemo(() => peak(`${props.host} visitors`, Math.max(0, ...props.stats.daily.visitors)));
   const maxes = createMemo(() => ({ count: top() }));
+  // Only new when the series is: `stats` is new with each day hovered, and
+  // new lines would rebuild the chart under the pointer.
+  const series = createMemo(() => props.stats.daily.visitors);
+  const lines = createMemo(() => filled(series(), theme.stats.visitors));
 
   return (
     <div class="people">
@@ -76,7 +80,7 @@ export function People(props: {
       </div>
       <Chart
         days={props.days}
-        lines={filled(props.stats.daily.visitors, theme.stats.visitors)}
+        lines={lines()}
         maxes={maxes()}
         height={120}
         lineWidth={2}

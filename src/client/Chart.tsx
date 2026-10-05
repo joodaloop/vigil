@@ -22,7 +22,8 @@ export const filled = (values: (number | null)[], color: string, light = true): 
 const PEAKS = "peaks";
 const peaks: Record<string, number> = (() => {
     try {
-        return JSON.parse(sessionStorage.getItem(PEAKS) ?? "{}");
+        const saved = JSON.parse(sessionStorage.getItem(PEAKS) ?? "{}");
+        return saved && typeof saved === "object" ? saved : {};
     } catch {
         return {};
     }

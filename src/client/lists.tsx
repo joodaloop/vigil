@@ -2,7 +2,7 @@ import { createMemo, createSignal, flush, For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import type { PageRow, Referrer } from "../shared/types";
 import { referrerIcon, referrerName } from "../shared/referrers";
-import { Chart, filled, peak, type Line } from "./Chart";
+import { Chart, filled, type Line } from "./Chart";
 import { num, pct, share } from "./format";
 import { SourceIcon } from "./icons";
 import { onShortcut } from "./keys";
@@ -12,7 +12,7 @@ import { theme } from "./theme";
 export function Pages(props: {
   items: PageRow[];
   rows: number; // the list's rows unfiltered, for its height
-  host: string;
+  maxes: Record<string, number>; // the sparklines' scale (see List)
   days: number[];
   engaged: boolean;
   picked: string | null;
@@ -21,7 +21,7 @@ export function Pages(props: {
   return (
     <List
       class="pages"
-      host={props.host}
+      maxes={props.maxes}
       pageKeys={[..."1234567890"]}
       items={props.items}
       rows={props.rows}
@@ -54,6 +54,7 @@ export function Pages(props: {
 export function Referrers(props: {
   items: Referrer[];
   rows: number; // the list's rows unfiltered, for its height
+  maxes: Record<string, number>; // the sparklines' scale (see List)
   host: string;
   icon?: number; // the site's saved favicon's version, for its own pages
   days: number[];
@@ -64,7 +65,7 @@ export function Referrers(props: {
   return (
     <List
       class="referrers"
-      host={props.host}
+      maxes={props.maxes}
       pageKeys={[..."qwertyuiopasdfghjkl"]}
       byNew
       items={props.items}
@@ -91,7 +92,7 @@ export function Referrers(props: {
 }
 
 // Pages or referrers, as they come: each row its label (`label`), a
-// sparkline of its daily views, its views and its new visitors, over a bar
+// sparkline of its daily views (on `maxes`' scale), its views and its new visitors, over a bar
 // as long as its share of the list's views, or with `byNew`, of its new
 // visitors. In engaged mode (`engaged`), engaged views stand in for views,
 // in bold, their sparklines show them filled solid under the views, and the bars are their shares
@@ -102,7 +103,7 @@ export function Referrers(props: {
 // was on its page when it was clicked, rather than moving up to the top.
 function List<T extends { views: number; new: number; reads: number; daily: number[]; dailyReads: number[] }>(props: {
   class: string;
-  host: string;
+  maxes: Record<string, number>;
   items: T[];
   rows: number; // its rows unfiltered: it's at least as tall as that many, up to a page
   key: (item: T) => string;
@@ -132,18 +133,6 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
   );
   const viewsTotal = createMemo(() => items().reduce((n, x) => n + views(x), 0));
   const newTotal = createMemo(() => items().reduce((n, x) => n + x.new, 0));
-  // One scale for every sparkline (across all pages of the list), the
-  // largest day seen on the host's lists yet (pages and referrers share it),
-  // so their heights compare, and with the other list's and with other
-  // periods' and filters'. A number first, so the scale only
-  // changes (and the sparklines are only redrawn) when it does: hovering a
-  // day leaves it be.
-  const maxCount = createMemo(() => {
-    let max = 0;
-    for (const x of items()) for (const v of x.daily) if (v > max) max = v;
-    return peak(`${props.host} lists`, max);
-  });
-  const maxes = createMemo(() => ({ count: maxCount() }));
   return (
     <div class={props.class}>
       <Paged items={items()} key={props.key} offset={offset()} minRows={props.rows} pageKeys={props.pageKeys}>
@@ -176,7 +165,7 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
                 <Chart
                   days={props.days}
                   lines={lines()}
-                  maxes={maxes()}
+                  maxes={props.maxes}
                   height={22}
                   lineWidth={1.25}
                 />
