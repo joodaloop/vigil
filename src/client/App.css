@@ -151,16 +151,20 @@ main {
   padding: 2rem calc(1.75rem - var(--item-pad)) 3.75rem;
 }
 
-/* Name on the left, period on the right. */
+/* The intro, then a link to the code, or the day hovered on the hosts'
+   charts in its place. */
 .sidebar-top {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 1rem;
   margin-bottom: 2rem;
   padding-inline: var(--item-pad);
   font-size: 0.9rem;
   line-height: 1.5em;
+}
+
+.sidebar-day {
+  font-weight: 600;
 }
 
 h1 {
@@ -193,9 +197,7 @@ h1 {
      the same place. */
   grid-template-columns: calc(2 * var(--count) + var(--count-gap)) minmax(0, 1fr);
   column-gap: 0.6rem;
-  /* A chart's baseline is its bottom edge, so this sits it on the numbers'
-     baseline; pulled down by its padding (Chart's ceil(lineWidth)) so its
-     zero line is what lands there. */
+  /* Sits the chart's baseline (see below) on the numbers'. */
   align-items: last baseline;
 }
 
@@ -209,7 +211,14 @@ h1 {
   width: var(--count);
 }
 
-.host-nums .chart {
+/* The plot sits on a line of text, as the numbers do, so the chart reaches
+   as far below the baseline as they do, and fills the row to hover over.
+   An inline block's baseline is its bottom margin edge, so the negative
+   margin pulls the plot down through its padding (Chart's ceil(lineWidth)),
+   toward its zero line. */
+.host-nums .chart-plot {
+  display: inline-block;
+  width: 100%;
   margin-bottom: -1px;
 }
 

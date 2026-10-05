@@ -121,8 +121,10 @@ export function App(props: { sites: Site[] }) {
     const views = (h: Site) => hosts[h.host]?.totals[k] ?? 0;
     return [...HOSTS].sort((a, b) => views(b) - views(a));
   });
-  // The day hovered or pinned on the main chart (unix seconds), which the
-  // sidebar shows too: its index in the sidebar's days, if it's one of them.
+  // The day hovered on any of the sidebar's charts, which they all mark and
+  // show the numbers of: kept as the day itself (unix seconds), and found
+  // among their days, so it's never one they don't have. The main chart's
+  // day doesn't reach the sidebar.
   const [hoveredDay, setHoveredDay] = createSignal<number | null>(null);
   const sidebarDay = () => {
     const i = hoveredDay() === null ? -1 : summaries().days.indexOf(hoveredDay()!);
@@ -155,7 +157,8 @@ export function App(props: { sites: Site[] }) {
         <nav class="sidebar">
           <div class="sidebar-top">
             <p>
-              Useful, minimal, & privacy-unfriendly analytics, by{" "}
+              <strong>Vigil</strong> is an app for useful, minimal, & privacy-unfriendly analytics,
+              by{" "}
               <a
                 style={{ color: "inherit", "text-underline-offset": "3px" }}
                 href="https://joodaloop.com"
@@ -164,6 +167,25 @@ export function App(props: { sites: Site[] }) {
               </a>
               .
             </p>
+            {/* The day hovered on the sidebar's charts, in its place while
+                there is one. */}
+            <Show
+              when={sidebarDay() !== null}
+              fallback={
+                <p>
+                  Get your own copy from{" "}
+                  <a
+                    style={{ color: "inherit", "text-underline-offset": "3px" }}
+                    href="https://github.com/joodaloop/vigil"
+                  >
+                    Github
+                  </a>
+                  .
+                </p>
+              }
+            >
+              <p class="sidebar-day">{dateOf(summaries().days[sidebarDay()!] * 1000)}</p>
+            </Show>
           </div>
 
           {/* One entry per host; the open one is shown in full on the right. */}
@@ -206,6 +228,8 @@ export function App(props: { sites: Site[] }) {
                           height={20}
                           lineWidth={1.5}
                           marked={sidebarDay()}
+                          onHover={(i) => setHoveredDay(i === null ? null : summaries().days[i])}
+                          pinnable={false}
                         />
                       </span>
                     </Show>
@@ -246,7 +270,6 @@ export function App(props: { sites: Site[] }) {
               ago={view().q.ago}
               onPeriod={(days, ago) => update({ days, ago })}
               updating={updating()}
-              onDay={setHoveredDay}
               engaged={engaged()}
               onEngaged={() => setEngaged((on) => !on)}
             />
@@ -270,7 +293,6 @@ function Stats(props: {
   ago: number; // how many days before today the period ends
   onPeriod: (days: number, ago: number) => void; // a period picked (see periods)
   updating: boolean; // new stats on their way
-  onDay: (day: number | null) => void; // the day hovered or pinned, in unix seconds
   engaged: boolean; // engaged mode (see App)
   onEngaged: () => void; // a click on the engaged total, turning it on or off
 }) {
@@ -422,12 +444,8 @@ function Stats(props: {
           height={160}
           headroom={8}
           lineWidth={2}
-          hoverDelay={0}
-          onHover={(i) => {
-            const t = i === null ? null : props.days[i];
-            setHovered(t);
-            props.onDay(t);
-          }}
+          hoverDelay={50}
+          onHover={(i) => setHovered(i === null ? null : props.days[i])}
         />
       </div>
 
@@ -491,16 +509,22 @@ const periodKey = (days: number, ago: number) => `${days} ${ago}`;
 const isMonth = (days: number, ago: number) =>
   periods().findIndex((p) => p.key === periodKey(days, ago)) > 0;
 
-// "Saturday, 15th": a day hovered, after its period's name; with its month
-// ("Saturday, 15th August") when that name isn't a month's.
+// "15th, Saturday": a day hovered, after its period's name; with its month
+// ("15th August, Saturday") when that name isn't a month's.
 const weekday = new Intl.DateTimeFormat("en", { weekday: "long", timeZone: "UTC" });
 const month = new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" });
 const ordinal = new Intl.PluralRules("en", { type: "ordinal" });
 const SUFFIX: Record<string, string> = { one: "st", two: "nd", few: "rd", other: "th" };
 function dayOf(ms: number, withMonth: boolean): string {
   const d = new Date(ms).getUTCDate();
-  const day = `${weekday.format(ms)}, ${d}${SUFFIX[ordinal.select(d)]}`;
-  return withMonth ? `${day} ${month.format(ms)}` : day;
+  const day = `${d}${SUFFIX[ordinal.select(d)]}`;
+  return `${withMonth ? `${day} ${month.format(ms)}` : day}, ${weekday.format(ms)}`;
+}
+
+// "15th August 2026": a day hovered on the sidebar's charts.
+function dateOf(ms: number): string {
+  const d = new Date(ms).getUTCDate();
+  return `${d}${SUFFIX[ordinal.select(d)]} ${month.format(ms)} ${new Date(ms).getUTCFullYear()}`;
 }
 
 // The stats as of a day hovered on the main chart (`day`), or the period's:

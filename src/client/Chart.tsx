@@ -27,11 +27,13 @@ const chartPadding = (lineWidth: number) => Math.ceil(lineWidth);
 //
 // With `onHover`, hovering marks the day nearest the pointer (never a
 // placeholder) with dots on the lines, and reports its index; null once the
-// pointer leaves. `hoverDelay` waits that many ms after a mouse enters;
-// moving between days after that is immediate. Clicking pins the day, adding a line down through it: it
+// pointer leaves. With `hoverDelay`, a mouse entering marks nothing until it
+// comes to rest (stays still that many ms), so passing across the chart
+// doesn't; moving between days after that is immediate, until it leaves. Clicking pins the day, adding a line down through it: it
 // stays marked and reported, whatever the pointer does, until another day is
 // clicked (pinning that one instead), it is clicked again, or the days
-// change to ones without it (another period that doesn't reach it).
+// change to ones without it (another period that doesn't reach it); unless
+// `pinnable` is false, when clicks are left alone.
 //
 // `marked` marks a day chosen elsewhere (e.g. on another chart) with dots
 // on the lines alone.
@@ -44,6 +46,7 @@ export function Chart(props: {
     headroom?: number;
     onHover?: (i: number | null) => void;
     hoverDelay?: number;
+    pinnable?: boolean;
     marked?: number | null;
 }) {
     const height = () => props.height + (props.headroom ?? 0);
@@ -116,14 +119,14 @@ export function Chart(props: {
     function onMove(e: PointerEvent) {
         if (!plot || !props.onHover || props.days.length === 0 || pinned() !== null) return;
         if (e.pointerType === "mouse" && (props.hoverDelay ?? 0) > 0 && !hoverReady) {
+            // Each move starts the wait over.
             mouseX = e.clientX;
-            if (hoverTimer === undefined) {
-                hoverTimer = window.setTimeout(() => {
-                    hoverTimer = undefined;
-                    hoverReady = true;
-                    if (mouseX !== null) showHover(mouseX);
-                }, props.hoverDelay);
-            }
+            window.clearTimeout(hoverTimer);
+            hoverTimer = window.setTimeout(() => {
+                hoverTimer = undefined;
+                hoverReady = true;
+                if (mouseX !== null) showHover(mouseX);
+            }, props.hoverDelay);
             return;
         }
         showHover(e.clientX);
@@ -141,7 +144,7 @@ export function Chart(props: {
     // pointer. The day is the click's own, as a tap has already cleared the
     // hover.
     function onClick(e: MouseEvent) {
-        if (!plot || !props.onHover || props.days.length === 0) return;
+        if (!plot || !props.onHover || props.days.length === 0 || props.pinnable === false) return;
         resetHoverDelay();
         hoverReady = true;
         const i = dayAt(plot, e);
@@ -261,7 +264,9 @@ export function Chart(props: {
         <div
             ref={box}
             class={["chart", { hoverable: !!props.onHover, pinned: pinned() !== null }]}
-            style={{ height: `${height()}px` }}
+            // At least the plot's height (before it's drawn too), or taller
+            // if the page's styles lay the plot out in a line of text.
+            style={{ "min-height": `${height()}px` }}
             // Touch: a finger down shows its day, dragging sideways moves
             // through days, lifting it (or a scroll taking over) clears it.
             onPointerEnter={onMove}
