@@ -161,11 +161,7 @@ main {
   padding-inline: var(--item-pad);
   font-size: 0.9rem;
   line-height: 1.5em;
-}
-
-.sidebar-day {
-  font-weight: 600;
-  text-align: right;
+  text-wrap: balance;
 }
 
 h1 {

@@ -157,8 +157,7 @@ export function App(props: { sites: Site[] }) {
         <nav class="sidebar">
           <div class="sidebar-top">
             <p>
-              <strong>Vigil</strong> is an app for useful, minimal, & privacy-unfriendly analytics,
-              by{" "}
+              <strong>Vigil</strong> is an app for privacy-unfriendly analytics, designed by{" "}
               <a
                 style={{ color: "inherit", "text-underline-offset": "3px" }}
                 href="https://joodaloop.com"
@@ -172,8 +171,8 @@ export function App(props: { sites: Site[] }) {
             <Show
               when={sidebarDay() !== null}
               fallback={
-                <p>
-                  Get your own copy from{" "}
+                <p style={{ "text-align": "right", "font-weight": 600 }}>
+                  Source available on{" "}
                   <a
                     style={{ color: "inherit", "text-underline-offset": "3px" }}
                     href="https://github.com/joodaloop/vigil"
@@ -184,7 +183,9 @@ export function App(props: { sites: Site[] }) {
                 </p>
               }
             >
-              <p class="sidebar-day">{dateOf(summaries().days[sidebarDay()!] * 1000)}</p>
+              <p style={{ "text-align": "right", "font-weight": 600 }}>
+                {dateOf(summaries().days[sidebarDay()!] * 1000)}
+              </p>
             </Show>
           </div>
 
