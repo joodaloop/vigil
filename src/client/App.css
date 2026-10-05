@@ -171,42 +171,6 @@ h1 {
   margin: 0px 0px -2px;
 }
 
-.days-picker {
-  position: relative;
-  user-select: none;
-  text-align: right;
-  padding-top: 3px;
-}
-
-/* Its outline clear of the big number. */
-.days-picker:has(> select:focus-visible) {
-  outline-offset: 4px;
-}
-
-.days-num {
-  font-size: 1.4rem;
-  line-height: 0.9;
-  font-weight: 600;
-}
-
-.days-label {
-  font-weight: 600;
-}
-
-.days-picker select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  opacity: 0;
-  border: 0;
-  appearance: none;
-  cursor: pointer;
-}
-
-select option {
-  background: var(--bg);
-}
-
 /* A host: its name, then views and new visitors beside a sparkline of its
    views. */
 .host-item {
@@ -359,9 +323,43 @@ select option {
   color: var(--muted);
 }
 
-.host-dates {
+/* The period's dates, then the day hovered beside them. */
+.host-period {
+  display: flex;
+  gap: 0.3em;
+  min-width: 0;
+  margin-top: 4px;
   font-weight: 600;
-  padding-top: 4px;
+}
+
+.host-day {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* The period: a select, invisible over the text it shows, as wide as that
+   text, on light grey. Pulled out to the left by its padding so the text
+   stays in line; the day hovered keeps clear of it on the right. */
+.host-dates {
+  position: relative;
+  min-width: 0;
+  padding: 0 6px 2px;
+  margin: 0 0 -2px -6px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.host-dates select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  border: 0;
+  appearance: none;
+  cursor: pointer;
+}
+
+select option {
+  background: var(--bg);
 }
 
 .totals {
@@ -381,12 +379,13 @@ select option {
 }
 
 /* The engaged total: a button as wide as its text, that turns engaged mode
-   on and off; on a light version of its blue while hovered, and while it's
-   on, its text in the page's background colour on that blue. Pulled out by
+   on and off; on a light version of its blue, and while it's on, its text
+   in the page's background colour on that blue. Pulled out by
    its padding so the text stays in line. */
 .engaged-toggle {
   padding: 0 6px 2px;
   margin: 0 -6px -2px; /* its padding taken back, so nothing moves */
+  background: color-mix(in srgb, var(--views) 15%, transparent);
 }
 
 /* Its right edge stays put, so a changing number only moves its left one:
@@ -395,10 +394,6 @@ select option {
 .stats-head .sub:has(> .engaged-toggle) {
   display: flex;
   justify-content: flex-end;
-}
-
-.engaged-toggle:hover {
-  background: color-mix(in srgb, var(--views) 15%, transparent);
 }
 
 .engaged-toggle[aria-pressed="true"] {

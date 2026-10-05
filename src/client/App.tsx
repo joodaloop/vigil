@@ -13,7 +13,7 @@ import { type Sparse, toDense } from "../shared/series";
 import type { HostStats, HostSummaries, Overview, PageRow, Referrer, Site } from "../shared/types";
 import { get, remember } from "./api";
 import { Chart } from "./Chart";
-import { DEFAULT_PERIOD, PERIODS } from "./config";
+import { DEFAULT_PERIOD } from "./config";
 import { fullDate, num, pct } from "./format";
 import { Pages, Referrers, sparkline } from "./lists";
 import { People } from "./people";
@@ -31,6 +31,7 @@ type Filters = {
 type Query = {
   host: string;
   days: number;
+  ago: number; // how many days before today the period ends
 } & Filters;
 
 function initialQuery(hosts: Site[]): Query {
@@ -39,7 +40,8 @@ function initialQuery(hosts: Site[]): Query {
   const host = params.get("host");
   return {
     host: hosts.some((h) => h.host === host) ? host! : hosts[0].host,
-    days: PERIODS.includes(n) ? n : DEFAULT_PERIOD,
+    days: Number.isInteger(n) && n >= 1 && n <= 366 ? n : DEFAULT_PERIOD,
+    ago: Math.max(0, Math.floor(Number(params.get("ago")) || 0)),
     country: params.get("country") || null,
     page: params.get("page") || null,
     source: params.get("source") || null,
@@ -47,9 +49,10 @@ function initialQuery(hosts: Site[]): Query {
 }
 
 // The query as the address's and the API's parameters, leaving out filters
-// that aren't set.
+// that aren't set (and `ago` while the period ends today).
 function toParams(q: Query) {
   const params = new URLSearchParams({ host: q.host, days: String(q.days) });
+  if (q.ago) params.set("ago", String(q.ago));
   for (const k of ["country", "page", "source"] as const) if (q[k] !== null) params.set(k, q[k]);
   return params;
 }
@@ -80,10 +83,12 @@ export function App(props: { sites: Site[] }) {
   const [query, setQuery] = createSignal(initialQuery(HOSTS));
   // The open host's unfiltered overview: what's shown without filters (and
   // kept, so clearing them is instant).
-  const period = createMemo(() => `${query().host} ${query().days}`);
+  const period = createMemo(() => `${query().host} ${query().days} ${query().ago}`);
   const unfiltered = createMemo(() => {
-    const [host, days] = period().split(" ");
-    return getOverview(new URLSearchParams({ host, days }));
+    const [host, days, ago] = period().split(" ");
+    const params = new URLSearchParams({ host, days });
+    if (ago !== "0") params.set("ago", ago);
+    return getOverview(params);
   });
   // The open host's stats, along with the query they answer. While a new
   // query loads, this (and everything drawn from it) keeps showing the last
@@ -96,9 +101,11 @@ export function App(props: { sites: Site[] }) {
   });
   // Headline numbers for every host, for the sidebar. Only refetched when the
   // period changes (and reused if it was loaded in the last few minutes).
-  const days = createMemo(() => query().days);
+  const days = createMemo(() => `${query().days} ${query().ago}`);
   const summaries = createMemo(() => {
-    const params = new URLSearchParams({ days: String(days()) });
+    const [n, ago] = days().split(" ");
+    const params = new URLSearchParams({ days: n });
+    if (ago !== "0") params.set("ago", ago);
     return remember(`/api/hosts?${params}`, () => get<HostSummaries>("/api/hosts", params));
   });
   // Engaged mode: views shown as engaged ones (reads) instead, in the lists,
@@ -141,23 +148,16 @@ export function App(props: { sites: Site[] }) {
       <main>
         <nav class="sidebar">
           <div class="sidebar-top">
-            <p> Useful, minimal, & privacy-unfriendly analytics. </p>
-            <div class="days-picker">
-              <div class="days-num" aria-hidden="true">
-                {latest(() => query().days)}
-              </div>
-              <div class="days-label" aria-hidden="true">
-                days
-              </div>
-              <select
-                id="period"
-                aria-label="Time period"
-                value={latest(() => query().days)}
-                onChange={(e) => update({ days: Number(e.currentTarget.value) })}
+            <p>
+              Useful, minimal, & privacy-unfriendly analytics, by{" "}
+              <a
+                style={{ color: "inherit", "text-underline-offset": "3px" }}
+                href="https://joodaloop.com"
               >
-                <For each={PERIODS}>{(n) => <option value={n}>{n} days</option>}</For>
-              </select>
-            </div>
+                Judah
+              </a>
+              .
+            </p>
           </div>
 
           {/* One entry per host; the open one is shown in full on the right. */}
@@ -237,6 +237,8 @@ export function App(props: { sites: Site[] }) {
                 source: view().q.source,
               }}
               onFilter={update}
+              ago={view().q.ago}
+              onPeriod={(days, ago) => update({ days, ago })}
               onDay={setHoveredDay}
               engaged={engaged()}
               onEngaged={() => setEngaged((on) => !on)}
@@ -258,6 +260,8 @@ function Stats(props: {
   rows: { pages: number; referrers: number }; // each list's rows, unfiltered
   filters: Filters;
   onFilter: (change: Partial<Filters>) => void;
+  ago: number; // how many days before today the period ends
+  onPeriod: (days: number, ago: number) => void; // a period picked (see periods)
   onDay: (day: number | null) => void; // the day hovered or pinned, in unix seconds
   engaged: boolean; // engaged mode (see App)
   onEngaged: () => void; // a click on the engaged total, turning it on or off
@@ -300,15 +304,34 @@ function Stats(props: {
             <span class="host-url" title={`https://${props.host}/`}>
               {props.host}
             </span>
-            {/* The period's first and last days, or the day hovered. */}
-            <span class="host-dates">
-              {day() === null
-                ? fullDate.formatRange(
-                    props.days[0] * 1000,
-                    props.days[props.days.length - 1] * 1000,
-                  )
-                : fullDate.format(props.days[day()!] * 1000)}
-            </span>
+            {/* The period's name ("Last 30 days", "September 2026"), or for
+                any other period its first and last days, which picks
+                another period; then the day hovered, if any. */}
+            <div class="host-period">
+              <div class="host-dates">
+                <span class="dates-text" aria-hidden="true">
+                  {periods().find((p) => p.key === periodKey(props.days.length, props.ago))
+                    ?.label ??
+                    fullDate.formatRange(
+                      props.days[0] * 1000,
+                      props.days[props.days.length - 1] * 1000,
+                    )}
+                </span>
+                <select
+                  aria-label="Period"
+                  value={periodKey(props.days.length, props.ago)}
+                  onChange={(e) => {
+                    const [days, ago] = e.currentTarget.value.split(" ").map(Number);
+                    props.onPeriod(days, ago);
+                  }}
+                >
+                  <For each={periods()}>{(p) => <option value={p.key}>{p.label}</option>}</For>
+                </select>
+              </div>
+              <Show when={day() !== null}>
+                <span class="host-day">— {dayOf(props.days[day()!] * 1000)}</span>
+              </Show>
+            </div>
           </div>
           {/* While a day is hovered: its numbers. */}
           <div class="totals">
@@ -328,7 +351,9 @@ function Stats(props: {
                 >
                   {/* Only the form shown (unlike the other numbers, which
                       keep both), so the button is as wide as its text. */}
-                  {asPct() ? `${pct(st().reads, st().views)}% engaged` : `${num(st().reads)} engaged`}
+                  {asPct()
+                    ? `${pct(st().reads, st().views)}% engaged`
+                    : `${num(st().reads)} engaged`}
                 </button>
               </div>
             </div>
@@ -374,7 +399,7 @@ function Stats(props: {
           height={160}
           headroom={8}
           lineWidth={2}
-          hoverDelay={250}
+          hoverDelay={0}
           onHover={(i) => {
             const t = i === null ? null : props.days[i];
             setHovered(t);
@@ -413,6 +438,39 @@ function Stats(props: {
       />
     </div>
   );
+}
+
+// The periods the dates pick between, most recent first: the last
+// DEFAULT_PERIOD days, then each of the 19 months before this one. Each is
+// `days` long and ends `ago` days before today, and is keyed by both.
+const monthName = new Intl.DateTimeFormat("en", {
+  month: "long",
+  year: "numeric",
+  timeZone: "UTC",
+});
+function periods(): { key: string; label: string }[] {
+  const DAY = 86400_000;
+  const now = new Date();
+  const today = Math.floor(now.getTime() / DAY);
+  const months = Array.from({ length: 19 }, (_, i) => {
+    const first = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i - 1, 1) / DAY;
+    const last = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 0) / DAY;
+    return {
+      key: periodKey(last - first + 1, today - last),
+      label: monthName.format(first * DAY),
+    };
+  });
+  return [{ key: periodKey(DEFAULT_PERIOD, 0), label: `Last ${DEFAULT_PERIOD} days` }, ...months];
+}
+const periodKey = (days: number, ago: number) => `${days} ${ago}`;
+
+// "Saturday, 15th": a day hovered, after its period's name.
+const weekday = new Intl.DateTimeFormat("en", { weekday: "long", timeZone: "UTC" });
+const ordinal = new Intl.PluralRules("en", { type: "ordinal" });
+const SUFFIX: Record<string, string> = { one: "st", two: "nd", few: "rd", other: "th" };
+function dayOf(ms: number): string {
+  const d = new Date(ms).getUTCDate();
+  return `${weekday.format(ms)}, ${d}${SUFFIX[ordinal.select(d)]}`;
 }
 
 // The stats as of a day hovered on the main chart (`day`), or the period's:

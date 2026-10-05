@@ -28,14 +28,16 @@ export function Pages(props: {
       picked={props.picked}
       onPick={props.onPick}
       label={(p) => {
-        // "/posts/x/" shows as "posts/x"; the home page stays "/".
-        const path = p.path.replace(/^\/+|\/+$/g, "") || "/";
+        // "/posts/x/" shows as "/posts/x"; the home page stays "/".
+        const path = p.path.replace(/(.)\/+$/, "$1");
         // Its title, if it's been read, with the path shown instead while
         // hovered.
         return p.title ? (
           <Swap text={p.title} hover={path} />
         ) : (
-          <span class="label">{path}</span>
+          <span class="label" title={path}>
+            {path}
+          </span>
         );
       }}
     />
@@ -192,10 +194,11 @@ export const sparkline = (values: number[], engaged: boolean): Line[] => [
 const address = (source: string, host: string) => (source.startsWith("/") ? host + source : source);
 
 // A row's name (`text`), and in the same place, shown instead while the row
-// is hovered, its address or path (`hover`); each cut short if it has to be.
+// is hovered, its address or path (`hover`); each cut short if it has to be,
+// so the address is its tooltip too.
 function Swap(props: { text: string; hover: string }) {
   return (
-    <span class="label swap">
+    <span class="label swap" title={props.hover}>
       <span>{props.text}</span>
       <span class="on-hover">{props.hover}</span>
     </span>

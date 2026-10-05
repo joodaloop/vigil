@@ -58,8 +58,9 @@ CREATE INDEX IF NOT EXISTS hits_by_country ON hits (host, country, ts, page, sou
 -- visitors: one row per person per site, i.e. per cookie. Attributes come from
 -- their first hit there.
 --
--- Every dashboard period ends today, so "visited in the period" is
--- "last_ts >= its start": unique visitors are a count of rows here.
+-- For a dashboard period that ends today, "visited in the period" is
+-- "last_ts >= its start": unique visitors are a count of rows here. (For an
+-- earlier one, they're counted from `hits`.)
 --
 --   new in the period:          first_ts >= start
 --   ...and never came back:     ... AND first_ts = last_ts (one hit, ever)

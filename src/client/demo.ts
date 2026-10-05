@@ -109,7 +109,7 @@ type Spike = { day: number; page: string; source: string; size: number };
 function spikes(host: string): Spike[] {
   const out: Spike[] = [];
   const pages = PAGES[host];
-  for (let day = today() - 400; day <= today(); day++) {
+  for (let day = today() - 700; day <= today(); day++) {
     if (rand(host, "spike", day) > 0.04) continue;
     out.push({
       day,
@@ -136,16 +136,16 @@ function row(host: string, name: string, share: number, daysList: number[], extr
   return { daily, dailyNew, views: sum(daily), new: sum(dailyNew) };
 }
 
-// A site's unfiltered stats over the `n` days to today, by UTC day number;
-// worked out once each.
+// A site's unfiltered stats over the `n` days ending `ago` days before today,
+// by UTC day number; worked out once each.
 const made = new Map<string, { dayNums: number[]; stats: HostStats }>();
-function unfiltered(host: string, n: number) {
-  const k = `${host} ${n} ${today()}`;
-  if (!made.has(k)) made.set(k, make(host, n));
+function unfiltered(host: string, n: number, ago: number) {
+  const k = `${host} ${n} ${ago} ${today()}`;
+  if (!made.has(k)) made.set(k, make(host, n, ago));
   return made.get(k)!;
 }
-function make(host: string, n: number): { dayNums: number[]; stats: HostStats } {
-  const dayNums = Array.from({ length: n }, (_, i) => today() - n + 1 + i);
+function make(host: string, n: number, ago: number): { dayNums: number[]; stats: HostStats } {
+  const dayNums = Array.from({ length: n }, (_, i) => today() - ago - n + 1 + i);
   const its = spikes(host);
   const pageShares = tail(PAGES[host], host);
   // A row's reads: about four in ten of its views each day.
@@ -231,8 +231,8 @@ function split<K extends string>(n: number, shares: Record<K, number>, key: stri
 // other number scaled by the picks' shares, each row a little off so the
 // lists reorder. (A picked row isn't: its numbers match the totals.)
 type Filters = { page: string | null; source: string | null; country: string | null };
-function filtered(host: string, n: number, f: Filters): HostStats {
-  const { stats } = unfiltered(host, n);
+function filtered(host: string, n: number, ago: number, f: Filters): HostStats {
+  const { stats } = unfiltered(host, n, ago);
   if (!f.page && !f.source && !f.country) return stats;
   const t = stats.totals;
   const page = stats.pages.find((p) => p.path === f.page);
@@ -301,12 +301,13 @@ const later = <T>(value: T) => new Promise<T>((resolve) => setTimeout(() => reso
 
 export function get(path: string, params: URLSearchParams): Promise<unknown> {
   const n = Math.min(366, Math.max(1, Number(params.get("days")) || 30));
+  const ago = Math.min(3660, Math.max(0, Math.floor(Number(params.get("ago")) || 0)));
   const days = (dayNums: number[]) => dayNums.map((d) => d * 86400);
   if (path === "/api/config") return later({ sites: SITES });
   if (path === "/api/hosts") {
     const result: HostSummaries = { days: [], hosts: {} };
     for (const { host } of SITES) {
-      const { dayNums, stats } = unfiltered(host, n);
+      const { dayNums, stats } = unfiltered(host, n, ago);
       result.days = days(dayNums);
       const { totals: t, daily: d } = stats;
       result.hosts[host] = {
@@ -319,7 +320,7 @@ export function get(path: string, params: URLSearchParams): Promise<unknown> {
   if (path === "/api/overview") {
     const host = params.get("host") ?? "";
     if (!LEVEL[host]) return Promise.reject(new Error("404 Not Found"));
-    const stats = filtered(host, n, {
+    const stats = filtered(host, n, ago, {
       page: params.get("page"),
       source: params.get("source"),
       country: params.get("country"),
@@ -332,7 +333,7 @@ export function get(path: string, params: URLSearchParams): Promise<unknown> {
       dailyReads: toSparse(r.dailyReads),
     });
     const result: Overview<Sparse> = {
-      days: days(unfiltered(host, n).dayNums),
+      days: days(unfiltered(host, n, ago).dayNums),
       stats: { ...stats, pages: stats.pages.map(sparse), referrers: stats.referrers.map(sparse) },
     };
     return later(result);

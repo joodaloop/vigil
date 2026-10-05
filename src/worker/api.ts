@@ -10,7 +10,8 @@ import { configuredSites } from "./sites";
 //   Views (with a daily series) and new visitors for every configured site,
 //   unfiltered, for the sidebar.
 //
-// Both cover the last `days` UTC days (today included). The overview takes
+// Both cover the last `days` UTC days (today included), or with `ago`, the
+// `days` days that ended `ago` days before today. The overview takes
 // optional `source`, `page` (path) and `country` (ISO code) filters.
 //
 // Every number is a SUM over `views` (schema.sql), except
@@ -28,11 +29,12 @@ type SourceInfoRow = { domain: string; name: string | null; icon: number | null 
 type PageTitleRow = { path: string; title: string };
 type HostDailyRow = { host: string; day: number; views: number; new: number; reads: number };
 
-// The first day (UTC day number) of the last `numDays`, and each day's start
-// in unix seconds.
-function period(numDays: number) {
-    const firstDay = Math.floor(Date.now() / 1000 / 86400) - numDays + 1;
-    return { firstDay, days: Array.from({ length: numDays }, (_, i) => (firstDay + i) * 86400) };
+// The first and last days (UTC day numbers) of the `numDays` ending `ago`
+// days before today, and each day's start in unix seconds.
+function period(numDays: number, ago: number) {
+    const lastDay = Math.floor(Date.now() / 1000 / 86400) - ago;
+    const firstDay = lastDay - numDays + 1;
+    return { firstDay, lastDay, days: Array.from({ length: numDays }, (_, i) => (firstDay + i) * 86400) };
 }
 
 function emptyHost(n: number): HostStats<Sparse> {
@@ -53,25 +55,27 @@ function emptyHost(n: number): HostStats<Sparse> {
     };
 }
 
-async function overview(env: Env, host: string, numDays: number, filters: Filters): Promise<Overview<Sparse>> {
+async function overview(env: Env, host: string, numDays: number, ago: number, filters: Filters): Promise<Overview<Sparse>> {
     const { page, source, country } = filters;
-    const { firstDay, days } = period(numDays);
+    const { firstDay, lastDay, days } = period(numDays, ago);
     const result: Overview<Sparse> = { days, stats: emptyHost(numDays) };
     // The sums are grouped in SQL, so the Worker gets back a few hundred
     // rows rather than every (day, page, source) one. Every number, lists
     // included, takes every filter.
     const q = (sql: string) => {
-        const where = ["host = ?", "day >= ?"];
-        const params: unknown[] = [host, firstDay];
+        const where = ["host = ?", "day >= ?", "day <= ?"];
+        const params: unknown[] = [host, firstDay, lastDay];
         if (page) where.push("page = ?"), params.push(page);
         if (source) where.push("source = ?"), params.push(source);
         return env.DB.prepare(sql.replace("$WHERE", where.join(" AND "))).bind(...params);
     };
     // The same three, from a country's hits.
-    const inCountry = country ? countrySums(host, firstDay, { page, source, country }) : null;
+    const inCountry = country ? countrySums(host, firstDay, { page, source, country }, lastDay) : null;
     const h = (part: { sql: string; params: unknown[] }) => env.DB.prepare(part.sql).bind(...part.params);
-    const filtered = page || source || country;
-    const byFilter = filtered ? filteredVisitors(host, firstDay, filters) : null;
+    // Visitors are counted from hits under a filter, or in a period that
+    // ended before today (when `visitors` only says who came since).
+    const fromHits = page || source || country || ago > 0;
+    const byFilter = fromHits ? filteredVisitors(host, firstDay, filters, lastDay) : null;
     const [daily, pages, sources, everyone, filteredDaily] = (await env.DB.batch([
         inCountry
             ? h(inCountry.daily)
@@ -93,16 +97,16 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
                   `SELECT source, day, SUM(views) AS views, SUM(new) AS new, SUM(reads) AS reads
                    FROM views WHERE $WHERE AND source != '' GROUP BY source, day`,
               ),
-        // Visitors in the period, by device, country and OS. Unfiltered:
-        // everyone whose latest visit is in it, since the period ends today,
-        // read from the covering index; filtered, from the filter's hits.
+        // Visitors in the period, by device, country and OS. Unfiltered and
+        // ending today: everyone whose latest visit is in it, read from the
+        // covering index; otherwise, from the period's (and filter's) hits.
         byFilter
             ? env.DB.prepare(byFilter.people).bind(...byFilter.params)
             : env.DB.prepare(
                   `SELECT device, country, os, COUNT(*) AS visitors, SUM(first_ts >= ?2 AND first_ts = last_ts) AS bounced
                    FROM visitors WHERE host = ?1 AND last_ts >= ?2 GROUP BY device, country, os`,
               ).bind(host, firstDay * 86400),
-        // Filtered, visitors per day; unfiltered, they're summed from `views`.
+        // From hits, visitors per day; otherwise they're summed from `views`.
         byFilter ? env.DB.prepare(byFilter.daily).bind(...byFilter.params) : null,
     ].filter((s) => s !== null))) as [
         D1Result<DailyRow>,
@@ -229,18 +233,18 @@ const OS: Record<string, "windows" | "mac" | "ios" | "android" | "linux"> = {
     "elementary OS": "linux",
 };
 
-async function hostSummaries(env: Env, hosts: string[], numDays: number): Promise<HostSummaries> {
-    const { firstDay, days } = period(numDays);
+async function hostSummaries(env: Env, hosts: string[], numDays: number, ago: number): Promise<HostSummaries> {
+    const { firstDay, lastDay, days } = period(numDays, ago);
     const result: HostSummaries = { days, hosts: {} };
     if (hosts.length === 0) return result;
 
-    // ?1 = first day, then the hosts.
-    const IN = hosts.map((_, i) => `?${i + 2}`).join(",");
+    // ?1 = first day, ?2 = last day, then the hosts.
+    const IN = hosts.map((_, i) => `?${i + 3}`).join(",");
     const { results } = await env.DB.prepare(
         `SELECT host, day, SUM(views) AS views, SUM(new) AS new, SUM(reads) AS reads
-         FROM views WHERE host IN (${IN}) AND day >= ?1 GROUP BY host, day`,
+         FROM views WHERE host IN (${IN}) AND day >= ?1 AND day <= ?2 GROUP BY host, day`,
     )
-        .bind(firstDay, ...hosts)
+        .bind(firstDay, lastDay, ...hosts)
         .all<HostDailyRow>();
 
     for (const r of results) {
@@ -263,6 +267,7 @@ export async function handleApi(url: URL, env: Env): Promise<Response> {
     if (url.pathname === "/api/config") return json({ sites: configuredSites(env) });
 
     const days = Math.min(366, Math.max(1, Number(url.searchParams.get("days")) || 30));
+    const ago = Math.min(3660, Math.max(0, Math.floor(Number(url.searchParams.get("ago")) || 0)));
 
     if (url.pathname === "/api/overview") {
         const host = (url.searchParams.get("host") ?? "").toLowerCase();
@@ -271,11 +276,11 @@ export async function handleApi(url: URL, env: Env): Promise<Response> {
             source: url.searchParams.get("source") || null,
             country: url.searchParams.get("country") || null,
         };
-        return json(await overview(env, host, days, filters));
+        return json(await overview(env, host, days, ago, filters));
     }
     if (url.pathname === "/api/hosts") {
         const hosts = configuredSites(env).map((s) => s.host);
-        return json(await hostSummaries(env, hosts, days));
+        return json(await hostSummaries(env, hosts, days, ago));
     }
     return new Response("Not found", { status: 404 });
 }
