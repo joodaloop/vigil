@@ -75,8 +75,9 @@ a:focus-visible {
 
 /* Hosts down the left, the open one in full on the right. */
 main {
+  --sidebar: 19rem;
   display: grid;
-  grid-template-columns: 19rem minmax(0, 1fr);
+  grid-template-columns: var(--sidebar) minmax(0, 1fr);
   max-width: 68.4rem; /* panel: about 49rem, just room for the lists side by side */
   min-height: 100vh;
   margin: 0 auto;
@@ -151,7 +152,8 @@ main {
   align-self: start;
   min-width: 0;
   min-height: 100vh;
-  padding: 1.5rem calc(1.75rem - var(--item-pad)); /* the shortcuts as near the bottom as the intro is the top */
+  --side-pad: calc(1.75rem - var(--item-pad));
+  padding: 1.5rem var(--side-pad); /* the shortcuts as near the bottom as the intro is the top */
 }
 
 /* The keyboard shortcuts, at the sidebar's end (at least 6rem below the
@@ -343,7 +345,7 @@ h1 {
 /* Visitors, under the lists: their numbers and countries at either end,
    then their chart running to the panel's edges like the main one. */
 .people {
-  margin-top: 2.5rem;
+  margin-top: 2rem;
 }
 
 /* The last thing in the panel, so its fill reaches the panel's bottom. */
@@ -725,20 +727,22 @@ select option {
   width: var(--spark);
 }
 
-/* Page squares: one per page, to the right, the current one filled;
-   hovering another shows a small square inside it. Each button is wider than
-   its square and they touch, so the gaps between squares are clickable too. */
+/* Page buttons: one per page, to the right, each labelled with the key that
+   picks it, the current one bold in the text's colour; hovering another
+   tints it. */
 .pager {
-  --slot: 15px; /* each button */
-  --square: 10px; /* the square drawn in it */
+  --slot: 18px; /* each button */
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  min-height: var(--slot); /* one row of squares, kept even when there are none */
-  width: fit-content; /* as wide as its squares, so its focus outline is too */
+  min-height: var(--slot); /* one row of buttons, kept even when there are none */
+  width: fit-content; /* as wide as its buttons, so its focus outline is too */
   margin-top: 1rem;
   margin-left: auto; /* on the right */
-  margin-right: calc((var(--square) - var(--slot)) / 2); /* the last square's edge in line */
+  /* The last key's right edge in line with the rows' (a key being about
+     1ch wide, centred in its button). */
+  margin-right: calc((1ch - var(--slot)) / 2);
+  font-size: 0.75rem;
 }
 
 .pager button {
@@ -747,22 +751,17 @@ select option {
   justify-content: center;
   width: var(--slot);
   height: var(--slot);
+  line-height: 1;
+  color: var(--muted);
 }
 
-.pager button::before {
-  content: "";
-  width: var(--square);
-  height: var(--square);
-  box-sizing: border-box; /* `*` doesn't reach pseudo-elements */
-  border: 1px solid var(--text);
-}
-
-.pager button.current::before {
-  background: var(--text);
+.pager button.current {
+  font-weight: 700;
+  color: var(--text);
 }
 
 /* No focus outline on a button: focus is always on the current page, already
-   filled. The pager as a whole has it instead, as any focused element does. */
+   marked. The pager as a whole has it instead, as any focused element does. */
 .pager button:focus-visible {
   outline: none;
 }
@@ -772,8 +771,9 @@ select option {
   outline-offset: 0;
 }
 
-.pager button:not(.current):hover::before {
-  background: linear-gradient(var(--text), var(--text)) center / 4px 4px no-repeat;
+.pager button:not(.current):hover {
+  background: var(--surface);
+  color: var(--text);
 }
 
 /* ---- Narrower screens ---- */
@@ -790,8 +790,11 @@ select option {
     column-gap: 1rem;
   }
 
+  /* The intro across the top, no wider than in the sidebar beside the
+     panel, so its lines don't run on. */
   .sidebar-top {
     grid-column: 1 / -1;
+    max-width: calc(var(--sidebar) - 2 * var(--side-pad));
   }
 
   /* No keyboard to speak of, so no shortcuts, and no room kept for them;
@@ -843,5 +846,21 @@ select option {
 
   .countries {
     text-align: left;
+  }
+}
+
+@media (max-width: 500px) {
+  /* The sidebar's hosts in one column. */
+  .sidebar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Without a fine pointer (a mouse or trackpad), page buttons big enough to
+   tap. */
+@media not (pointer: fine) {
+  .pager {
+    --slot: 28px;
+    font-size: 0.9375rem;
   }
 }

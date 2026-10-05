@@ -1,4 +1,5 @@
 import {
+  createEffect,
   createMemo,
   createSignal,
   Errored,
@@ -12,10 +13,10 @@ import {
 import { type Sparse, toDense } from "../shared/series";
 import type { HostStats, HostSummaries, Overview, PageRow, Referrer, Site } from "../shared/types";
 import { get, remember } from "./api";
-import { Chart, filled } from "./Chart";
+import { Chart, filled, peak } from "./Chart";
 import { DEFAULT_PERIOD } from "./config";
 import { fullDate, num, pct } from "./format";
-import { Pages, Referrers, sparkline } from "./lists";
+import { Pages, Referrers, sparkline, viewLines } from "./lists";
 import { People } from "./people";
 import { onShortcut } from "./keys";
 import { Shortcuts } from "./shortcuts";
@@ -191,7 +192,7 @@ export function App(props: { sites: Site[] }) {
             <Show
               when={sidebarDay() !== null}
               fallback={
-                <p style={{ "font-weight": 600 }}>
+                <p>
                   Clone it on{" "}
                   <a
                     style={{ color: "inherit", "text-underline-offset": "3px" }}
@@ -203,9 +204,13 @@ export function App(props: { sites: Site[] }) {
                 </p>
               }
             >
-              <p style={{ display: "flex", "justify-content": "space-between", "font-weight": 600 }}>
+              <p
+                style={{ display: "flex", "justify-content": "space-between", "font-weight": 600 }}
+              >
                 <span class="host-counts">
-                  <span style={{ color: theme.stats.views }}>{num(dayTotal(engaged() ? "reads" : "views"))}</span>
+                  <span style={{ color: theme.stats.views }}>
+                    {num(dayTotal(engaged() ? "reads" : "views"))}
+                  </span>
                   <span style={{ color: theme.stats.new }}>{num(dayTotal("new"))}</span>
                 </span>
                 {dateOf(summaries().days[sidebarDay()!] * 1000)}
@@ -218,6 +223,11 @@ export function App(props: { sites: Site[] }) {
             <For each={byViews()}>
               {(h) => {
                 const s = () => summaries().hosts[h.host];
+                // On the same scale as the host's chart on the right (see
+                // Stats): its largest day seen yet.
+                const maxes = createMemo(() => ({
+                  count: peak(h.host, Math.max(0, ...(s()?.daily.views ?? []))),
+                }));
                 // Marked as soon as it's picked, ahead of its stats.
                 const open = () => latest(() => query().host) === h.host;
                 // Nothing in the period.
@@ -250,14 +260,14 @@ export function App(props: { sites: Site[] }) {
                         <Chart
                           days={summaries().days}
                           lines={sparkline(
-                            (engaged() ? s()?.daily.reads : s()?.daily.views) ?? [],
-                            engaged(),
+                            s()?.daily.views ?? [],
+                            engaged() ? (s()?.daily.reads ?? []) : null,
                           )}
+                          maxes={maxes()}
                           height={24}
                           lineWidth={1.5}
                           marked={sidebarDay()}
                           onHover={(i) => setHoveredDay(i === null ? null : summaries().days[i])}
-                          pinnable={false}
                         />
                       </span>
                     </Show>
@@ -331,13 +341,31 @@ function Stats(props: {
   // the days shown, so it's never one they don't have (as for a moment after
   // the period changes, before the chart lets go of it).
   const [hovered, setHovered] = createSignal<number | null>(null);
+  // The day pinned by a click on either chart, shown instead while there is
+  // one, and kept the same way. It stays until another day is pinned, it's
+  // clicked again, Escape, or the days change to ones without it (another
+  // period that doesn't reach it).
+  const [pinned, setPinned] = createSignal<number | null>(null);
+  const indexOf = (d: number | null) => (d === null ? -1 : props.days.indexOf(d));
+  createEffect(
+    () => indexOf(pinned()) < 0,
+    (gone) => {
+      if (gone) setPinned(null);
+    },
+  );
   const day = createMemo(() => {
-    const i = hovered() === null ? -1 : props.days.indexOf(hovered()!);
+    const i = indexOf(pinned()) >= 0 ? indexOf(pinned()) : indexOf(hovered());
     return i < 0 ? null : i;
   });
+  const onHover = (i: number | null) => setHovered(i === null ? null : props.days[i]);
   // In engaged mode, the lists ranked by engaged views instead.
   const shown = createMemo(() => onDay(props.stats, day(), props.engaged));
   const st = () => shown().totals;
+  // The chart's scale, the host's largest day seen yet (views are never
+  // fewer than new visitors or engaged views).
+  const maxes = createMemo(() => ({
+    count: peak(props.host, Math.max(0, ...props.stats.daily.views)),
+  }));
   // "." switches the numbers to percentages and back, "," the lists' names
   // to their addresses and paths and back, "/" engaged mode on and off,
   // Backspace clears every filter, "[" and "]" pick the period before and
@@ -346,6 +374,21 @@ function Stats(props: {
   // Both remembered in this browser.
   const [asPct, setAsPct] = storedFlag("vigil:percentages", false);
   const [asAddress, setAsAddress] = storedFlag("vigil:addresses", false);
+  // While a day is pinned, the left and right arrows move the pin to the
+  // day before and after (round from one end to the other); while none is,
+  // right pins the first day and left the last. Escape unpins it.
+  onShortcut((e) => {
+    if (e.shiftKey || props.days.length === 0) return;
+    const by = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+    if (by !== undefined) {
+      e.preventDefault();
+      const from = indexOf(pinned());
+      const n = props.days.length;
+      setPinned(props.days[from < 0 ? (by > 0 ? 0 : n - 1) : (((from + by) % n) + n) % n]);
+    } else if (e.key === "Escape") {
+      setPinned(null);
+    }
+  });
   onShortcut((e) => {
     if (e.key === "." && !e.repeat) {
       setAsPct((p) => !p);
@@ -459,20 +502,22 @@ function Stats(props: {
         <Chart
           days={props.days}
           lines={
-            // Views and new visitors, each over a light fill; or in engaged
-            // mode, engaged views alone, filled solid.
-            props.engaged
-              ? filled(props.stats.daily.reads, theme.stats.views, false)
-              : [
-                  ...filled(props.stats.daily.views, theme.stats.views),
-                  ...filled(props.stats.daily.new, theme.stats.new),
-                ]
+            // Views and new visitors, each over a light fill; in engaged
+            // mode, with engaged views filled solid under the views.
+            [
+              ...viewLines(props.stats.daily.views, props.engaged ? props.stats.daily.reads : null),
+              ...filled(props.stats.daily.new, theme.stats.new),
+            ]
           }
+          maxes={maxes()}
           height={160}
           headroom={8}
           lineWidth={2}
           hoverDelay={50}
-          onHover={(i) => setHovered(i === null ? null : props.days[i])}
+          onHover={onHover}
+          pinned={pinned()}
+          onPin={setPinned}
+          marked={day()}
         />
       </div>
 
@@ -480,6 +525,7 @@ function Stats(props: {
         <Pages
           items={shown().pages}
           rows={props.rows.pages}
+          host={props.host}
           days={props.days}
           engaged={props.engaged}
           picked={props.filters.page}
@@ -498,9 +544,13 @@ function Stats(props: {
       </div>
 
       <People
+        host={props.host}
         stats={shown()}
         days={props.days}
         day={day()}
+        pinned={pinned()}
+        onHover={onHover}
+        onPin={setPinned}
         picked={props.filters.country}
         onPick={(country) => props.onFilter({ country })}
       />

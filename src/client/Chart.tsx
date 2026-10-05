@@ -1,6 +1,5 @@
 import { createEffect, createSignal, For, onSettled, Show, untrack } from "solid-js";
 import uPlot from "uplot";
-import { onShortcut } from "./keys";
 import "uplot/dist/uPlot.min.css";
 
 // `scale` groups lines that share a y axis (e.g. "count", "ratio"); `area`
@@ -14,6 +13,28 @@ export const filled = (values: (number | null)[], color: string, light = true): 
     { values, color, scale: "count", area: true, light },
     { values, color, scale: "count" },
 ];
+
+// The largest value seen on each key's charts this browser session, given
+// the largest on them now: a scale's max that only ever grows, so the charts
+// keep one scale as the period and filters change, and their heights compare.
+// Kept in session storage, so it survives reloads; wherever that can't be
+// used, for the page's life alone.
+const PEAKS = "peaks";
+const peaks: Record<string, number> = (() => {
+    try {
+        return JSON.parse(sessionStorage.getItem(PEAKS) ?? "{}");
+    } catch {
+        return {};
+    }
+})();
+export function peak(key: string, max: number) {
+    if (max <= (peaks[key] ?? 0)) return peaks[key] ?? 0;
+    peaks[key] = max;
+    try {
+        sessionStorage.setItem(PEAKS, JSON.stringify(peaks));
+    } catch {}
+    return max;
+}
 
 // Top of a scale's 0..top range, given the largest value on it.
 const scaleTop = (max: number) => (max > 0 ? max * 1.05 : 1);
@@ -34,21 +55,19 @@ const chartPadding = (lineWidth: number) => Math.ceil(lineWidth);
 // values, so the lines run to the edges while the first and last real days
 // sit clear of them.
 //
-// With `onHover`, hovering marks the day nearest the pointer (never a
-// placeholder) with dots on the lines, and reports its index; null once the
-// pointer leaves. With `hoverDelay`, a mouse entering marks nothing until it
-// comes to rest (stays still that many ms), so passing across the chart
-// doesn't; moving between days after that is immediate, until it leaves. Clicking pins the day, adding a line down through it: it
-// stays marked and reported, whatever the pointer does, until another day is
-// clicked (pinning that one instead), it is clicked again, or the days
-// change to ones without it (another period that doesn't reach it); unless
-// `pinnable` is false, when clicks are left alone. While a day is pinned,
-// the left and right arrows move the pin to the day before and after (round
-// from one end to the other); while
-// none is, right pins the first day and left the last. Escape unpins it.
+// With `onHover`, hovering reports the index of the day nearest the pointer
+// (never a placeholder); null once the pointer leaves. With `hoverDelay`, a
+// mouse entering reports nothing until it comes to rest (stays still that
+// many ms), so passing across the chart doesn't; moving between days after
+// that is immediate, until it leaves.
 //
-// `marked` marks a day chosen elsewhere (e.g. on another chart) with dots
-// on the lines alone.
+// With `onPin` too, clicking a day reports it (unix seconds) to be pinned,
+// or null if it's `pinned` already. The pin itself is kept by the caller,
+// so several charts can share it.
+//
+// The chart marks `pinned` (if it has that day) with dots on the lines and a
+// line down through it, or else `marked` (an index, e.g. the day hovered
+// here or on another chart) with dots alone.
 export function Chart(props: {
     days: number[];
     lines: Line[];
@@ -58,7 +77,8 @@ export function Chart(props: {
     headroom?: number;
     onHover?: (i: number | null) => void;
     hoverDelay?: number;
-    pinnable?: boolean;
+    pinned?: number | null;
+    onPin?: (day: number | null) => void;
     marked?: number | null;
 }) {
     const height = () => props.height + (props.headroom ?? 0);
@@ -77,10 +97,11 @@ export function Chart(props: {
         mouseX = null;
         hoverReady = false;
     }
-    // The day pinned by a click, if any: its index, and the day itself (unix
-    // seconds), to find it again among other days.
-    const [pinned, setPinned] = createSignal<number | null>(null);
-    let pinnedDay: number | null = null;
+    // The pinned day's index, if it's among the days.
+    const pinned = () => {
+        const i = props.pinned == null ? -1 : props.days.indexOf(props.pinned);
+        return i < 0 ? null : i;
+    };
     // Where the hovered day is drawn, in px from the chart's top left: its x,
     // a dot per line, and how far the plot's baseline is above the chart's
     // bottom edge (its padding), where the day's line stops.
@@ -105,9 +126,10 @@ export function Chart(props: {
         const top = over.top - b.top;
         setMark({
             x: over.left - b.left + u.valToPos(props.days[i], "x"),
-            // A fill's dot is a ring, and goes over a line's at the same
-            // place (the line along its top edge).
+            // A light fill has none (the line over it marks the day); a
+            // solid one's is a ring, and goes over a line's at the same place.
             dots: props.lines
+                .filter((l) => !l.light)
                 .map((l) => ({ y: top + u.valToPos(l.values[i] ?? 0, l.scale), color: l.color, ring: !!l.area }))
                 .sort((a, b) => Number(a.ring) - Number(b.ring)),
             base: b.bottom - over.bottom,
@@ -121,15 +143,15 @@ export function Chart(props: {
         return Math.max(0, Math.min(props.days.length - 1, u.posToIdx(e.clientX - over.left) - ends()));
     }
 
+    // Reported even while a day is pinned (which the caller shows instead),
+    // so the day under the pointer is known once it's unpinned.
     function showHover(clientX: number) {
-        if (!plot || !props.onHover || props.days.length === 0 || pinned() !== null) return;
-        const i = dayAt(plot, { clientX });
-        markDay(plot, i, false);
-        hover(i);
+        if (!plot || !props.onHover || props.days.length === 0) return;
+        hover(dayAt(plot, { clientX }));
     }
 
     function onMove(e: PointerEvent) {
-        if (!plot || !props.onHover || props.days.length === 0 || pinned() !== null) return;
+        if (!plot || !props.onHover || props.days.length === 0) return;
         if (e.pointerType === "mouse" && (props.hoverDelay ?? 0) > 0 && !hoverReady) {
             // Each move starts the wait over.
             mouseX = e.clientX;
@@ -146,8 +168,6 @@ export function Chart(props: {
 
     function onLeave() {
         resetHoverDelay();
-        if (pinned() !== null) return;
-        setMark(null);
         hover(null);
     }
 
@@ -158,49 +178,15 @@ export function Chart(props: {
     }
 
     // Pins the day at clientX (moving the pin there if another is pinned),
-    // or if it's the pinned one, unpins it and goes back to following the
-    // pointer. The day is the click's or tap's own, not the hovered one.
+    // or if it's the pinned one, unpins it, leaving it hovered. The day is
+    // the click's or tap's own, not the hovered one.
     function pin(clientX: number) {
-        if (!plot || !props.onHover || props.days.length === 0 || props.pinnable === false) return;
+        if (!plot || !props.onPin || props.days.length === 0) return;
         resetHoverDelay();
         hoverReady = true;
         const i = dayAt(plot, { clientX });
-        if (pinned() === i) {
-            // Back to hovering it (not through onMove, which would still
-            // read it as pinned until the next flush).
-            setPinned(null);
-            markDay(plot, i, false);
-            hover(i);
-        } else {
-            setPinned(i);
-            pinnedDay = props.days[i];
-            markDay(plot, i, true);
-            hover(i);
-        }
-    }
-
-    // Moves the pin `by` days, past either end round to the other; or with
-    // none pinned, pins the first day (moving later) or the last (moving
-    // earlier). Whether it could (this chart pins).
-    function movePin(by: number) {
-        if (!plot || !props.onHover || props.days.length === 0 || props.pinnable === false) return false;
-        const from = pinned();
-        const n = props.days.length;
-        const i = from === null ? (by > 0 ? 0 : n - 1) : (((from + by) % n) + n) % n;
-        if (i === from) return true;
-        setPinned(i);
-        pinnedDay = props.days[i];
-        markDay(plot, i, true);
         hover(i);
-        return true;
-    }
-
-    function unpin() {
-        if (pinned() === null) return;
-        setPinned(null);
-        pinnedDay = null;
-        setMark(null);
-        hover(null);
+        props.onPin(pinned() === i ? null : props.days[i]);
     }
 
     // Touch and pen pin on lifting rather than on the click after: iOS
@@ -228,19 +214,13 @@ export function Chart(props: {
         onLeave();
     }
 
-    // After every redraw (new data, a resize), the pinned day is re-marked
-    // where it now is among the days, or unpinned if they don't have it.
-    function redrawn(u: uPlot) {
-        if (props.marked != null) markDay(u, props.marked, false);
-        if (pinned() === null) return;
-        const i = props.days.indexOf(pinnedDay!);
-        if (i >= 0) {
-            setPinned(i);
-            markDay(u, i, true);
-            hover(i);
-        } else {
-            unpin();
-        }
+    // Marks the pinned day, or else the marked one, as drawn by `u`; after
+    // every redraw (new data, a resize) too, where it now is.
+    function remark(u: uPlot) {
+        const p = pinned();
+        if (p !== null) markDay(u, p, true);
+        else if (props.marked != null && props.marked < props.days.length) markDay(u, props.marked, false);
+        else setMark(null);
     }
 
     // Placeholder days, one before the first and one after the last: data
@@ -289,7 +269,7 @@ export function Chart(props: {
                 axes: [{ show: false }, { show: false }],
                 legend: { show: false },
                 cursor: { show: false },
-                hooks: { draw: [redrawn] },
+                hooks: { draw: [remark] },
                 select: { show: false, left: 0, top: 0, width: 0, height: 0 },
             },
             padded() as uPlot.AlignedData,
@@ -307,21 +287,11 @@ export function Chart(props: {
         };
     });
 
-    onShortcut((e) => {
-        if (e.shiftKey) return;
-        const by = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
-        if (by !== undefined) {
-            if (movePin(by)) e.preventDefault();
-        } else if (e.key === "Escape") unpin();
-    });
-
-    // Follow `marked`.
+    // Follow `pinned` and `marked`.
     createEffect(
-        () => props.marked,
-        (i) => {
-            if (!plot) return;
-            if (i == null) setMark(null);
-            else markDay(plot, i, false);
+        () => [pinned(), props.marked],
+        () => {
+            if (plot) untrack(() => remark(plot!));
         },
     );
 

@@ -16,7 +16,7 @@ const GROUPS: Shortcut[][] = [
   ],
   [
     [["1–0"], "Paginate pages list"],
-    [["q–p"], "Paingate referrer list"],
+    [["q–p", "a–l"], "Paginate referrer list"],
     [["↑", "↓"], "Move through a list"],
     [["Esc Esc"], "Focus first site in sidebar"],
   ],

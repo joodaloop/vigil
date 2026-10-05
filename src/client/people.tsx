@@ -1,6 +1,6 @@
-import { For } from "solid-js";
+import { createMemo, For } from "solid-js";
 import type { HostStats } from "../shared/types";
-import { Chart, filled } from "./Chart";
+import { Chart, filled, peak } from "./Chart";
 import { num, pct, perDevice } from "./format";
 import { DeviceIcon, OsIcon } from "./icons";
 import { theme } from "./theme";
@@ -12,9 +12,13 @@ import { theme } from "./theme";
 // country's flag filters by it (`onPick`), or if it's the one `picked`,
 // clears that filter.
 export function People(props: {
+  host: string;
   stats: HostStats;
   days: number[];
-  day: number | null;
+  day: number | null; // the day hovered or pinned, marked on the chart
+  pinned: number | null; // the day pinned (unix seconds), if any
+  onHover: (i: number | null) => void;
+  onPin: (day: number | null) => void;
   picked: string | null;
   onPick: (code: string | null) => void;
 }) {
@@ -23,6 +27,10 @@ export function People(props: {
   // Devices, systems and countries are only known for the whole period, so
   // they're hidden while a day is (see .period-only).
   const dayShown = () => props.day !== null;
+  // The chart's scale, the largest day of visitors seen on the host yet. A
+  // number first, so hovering a day (new stats, the same days) leaves it be.
+  const top = createMemo(() => peak(`${props.host} visitors`, Math.max(0, ...props.stats.daily.visitors)));
+  const maxes = createMemo(() => ({ count: top() }));
 
   return (
     <div class="people">
@@ -69,8 +77,13 @@ export function People(props: {
       <Chart
         days={props.days}
         lines={filled(props.stats.daily.visitors, theme.stats.visitors)}
+        maxes={maxes()}
         height={120}
         lineWidth={2}
+        hoverDelay={50}
+        onHover={props.onHover}
+        pinned={props.pinned}
+        onPin={props.onPin}
         marked={props.day}
       />
     </div>

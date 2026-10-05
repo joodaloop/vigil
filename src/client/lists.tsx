@@ -2,7 +2,7 @@ import { createMemo, createSignal, flush, For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import type { PageRow, Referrer } from "../shared/types";
 import { referrerIcon, referrerName } from "../shared/referrers";
-import { Chart, filled, type Line } from "./Chart";
+import { Chart, filled, peak, type Line } from "./Chart";
 import { num, pct, share } from "./format";
 import { SourceIcon } from "./icons";
 import { onShortcut } from "./keys";
@@ -12,6 +12,7 @@ import { theme } from "./theme";
 export function Pages(props: {
   items: PageRow[];
   rows: number; // the list's rows unfiltered, for its height
+  host: string;
   days: number[];
   engaged: boolean;
   picked: string | null;
@@ -20,6 +21,7 @@ export function Pages(props: {
   return (
     <List
       class="pages"
+      host={props.host}
       pageKeys={[..."1234567890"]}
       items={props.items}
       rows={props.rows}
@@ -62,7 +64,8 @@ export function Referrers(props: {
   return (
     <List
       class="referrers"
-      pageKeys={[..."qwertyuiop"]}
+      host={props.host}
+      pageKeys={[..."qwertyuiopasdfghjkl"]}
       byNew
       items={props.items}
       rows={props.rows}
@@ -91,7 +94,7 @@ export function Referrers(props: {
 // sparkline of its daily views, its views and its new visitors, over a bar
 // as long as its share of the list's views, or with `byNew`, of its new
 // visitors. In engaged mode (`engaged`), engaged views stand in for views,
-// in bold, their sparklines filled solid, and the bars are their shares
+// in bold, their sparklines show them filled solid under the views, and the bars are their shares
 // (`byNew` too, as the rows are then ranked by them). Each row is a button that filters by it (`onPick` with its
 // key), or if it's the one `picked`, clears that filter. The picked row is
 // always there to clear it: one with no views (`blank`) if it's not in
@@ -99,6 +102,7 @@ export function Referrers(props: {
 // was on its page when it was clicked, rather than moving up to the top.
 function List<T extends { views: number; new: number; reads: number; daily: number[]; dailyReads: number[] }>(props: {
   class: string;
+  host: string;
   items: T[];
   rows: number; // its rows unfiltered: it's at least as tall as that many, up to a page
   key: (item: T) => string;
@@ -120,7 +124,6 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
   };
   const views = (x: T) => (props.engaged ? x.reads : x.views);
   const byNew = () => props.byNew && !props.engaged;
-  const daily = (x: T) => (props.engaged ? x.dailyReads : x.daily);
   // Worked out once for the list, not for each row that reads them.
   const items = createMemo(() =>
     props.picked === null || props.items.some((x) => props.key(x) === props.picked)
@@ -129,24 +132,28 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
   );
   const viewsTotal = createMemo(() => items().reduce((n, x) => n + views(x), 0));
   const newTotal = createMemo(() => items().reduce((n, x) => n + x.new, 0));
-  // One scale for every sparkline (across all pages of the list), so their
-  // heights compare. A number first, so the scale only changes (and the
-  // sparklines are only redrawn) when it does: hovering a day leaves it be.
+  // One scale for every sparkline (across all pages of the list), the
+  // largest day seen on the host's lists yet (pages and referrers share it),
+  // so their heights compare, and with the other list's and with other
+  // periods' and filters'. A number first, so the scale only
+  // changes (and the sparklines are only redrawn) when it does: hovering a
+  // day leaves it be.
   const maxCount = createMemo(() => {
     let max = 0;
-    for (const x of items()) for (const v of daily(x)) if (v > max) max = v;
-    return max;
+    for (const x of items()) for (const v of x.daily) if (v > max) max = v;
+    return peak(`${props.host} lists`, max);
   });
   const maxes = createMemo(() => ({ count: maxCount() }));
   return (
     <div class={props.class}>
       <Paged items={items()} key={props.key} offset={offset()} minRows={props.rows} pageKeys={props.pageKeys}>
         {(x) => {
-          // The row's sparkline, only new when its series is (not when a day
-          // is hovered, which leaves it be) or engaged mode changes; a new
-          // one redraws it.
-          const series = createMemo(() => daily(x()));
-          const lines = createMemo(() => sparkline(series(), props.engaged));
+          // The row's sparkline, only new when its series are (not when a
+          // day is hovered, which leaves them be) or engaged mode changes; a
+          // new one redraws it.
+          const viewSeries = createMemo(() => x().daily);
+          const readSeries = createMemo(() => (props.engaged ? x().dailyReads : null));
+          const lines = createMemo(() => sparkline(viewSeries(), readSeries()));
           return (
             <button
               class={["row", { "by-new": byNew() }]}
@@ -188,10 +195,15 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
   );
 }
 
-// A sparkline's lines: views as a line over a light fill, or engaged views
-// filled solid.
-export const sparkline = (values: number[], engaged: boolean): Line[] =>
-  filled(values, theme.stats.views, !engaged);
+// Views as a line over a light fill, and given `reads` (engaged mode),
+// engaged views filled solid between the two.
+export function viewLines(views: number[], reads: number[] | null): Line[] {
+  const [fill, line] = filled(views, theme.stats.views);
+  return reads ? [fill, { values: reads, color: theme.stats.views, scale: "count", area: true }, line] : [fill, line];
+}
+
+// A sparkline's lines (see viewLines).
+export const sparkline = viewLines;
 
 // A source's address, without its scheme: a page on the site itself
 // ("blog.example/posts/x"), or the referring site ("someblog.com").
@@ -220,7 +232,8 @@ const noViews = (days: number[]) => ({
   dailyReads: days.map(() => 0),
 });
 
-// Shows `items` 10 at a time, with a row of page dots when there are more.
+// Shows `items` 10 at a time, with a row of page buttons when there are
+// more, each labelled with its key from `pageKeys` (or its number).
 // The list keeps a full page's height (or `minRows`' height, if fewer), dots
 // included, however few items there are. Rows are matched by `key`, so one stays the same element as its
 // data changes. Whenever the rows come in another order (a day hovered,
@@ -302,7 +315,9 @@ function Paged<T>(props: {
                 aria-current={i === current() ? "page" : undefined}
                 tabindex={i === current() ? 0 : -1}
                 onClick={() => setPage(i)}
-              />
+              >
+                {props.pageKeys?.[i] ?? i + 1}
+              </button>
             )}
           </For>
         </Show>
