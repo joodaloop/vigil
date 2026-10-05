@@ -1,3 +1,4 @@
+import { isWellKnown } from "../shared/referrers";
 import type { Sparse } from "../shared/series";
 import type { HostStats, HostSummaries, Overview, PageRow, Referrer } from "../shared/types";
 import { countrySums, type Filters, filteredVisitors } from "./hitQueries";
@@ -71,7 +72,7 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
     const h = (part: { sql: string; params: unknown[] }) => env.DB.prepare(part.sql).bind(...part.params);
     const filtered = page || source || country;
     const byFilter = filtered ? filteredVisitors(host, firstDay, filters) : null;
-    const [daily, pages, sources, everyone, sourceInfo, titles, filteredDaily] = (await env.DB.batch([
+    const [daily, pages, sources, everyone, filteredDaily] = (await env.DB.batch([
         inCountry
             ? h(inCountry.daily)
             : q(
@@ -101,19 +102,6 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
                   `SELECT device, country, os, COUNT(*) AS visitors, SUM(first_ts >= ?2 AND first_ts = last_ts) AS bounced
                    FROM visitors WHERE host = ?1 AND last_ts >= ?2 GROUP BY device, country, os`,
               ).bind(host, firstDay * 86400),
-        // Names and saved icons of the site and the period's other sites
-        // (schema.sql).
-        env.DB.prepare(
-            `SELECT domain, name, icon_ts AS icon FROM sources
-             WHERE domain = ?1 OR domain IN (SELECT source FROM views WHERE host = ?1 AND day >= ?2)`,
-        ).bind(host, firstDay),
-        // Titles of the period's pages, and of those clicked through from.
-        env.DB.prepare(
-            `SELECT path, title FROM pages
-             WHERE host = ?1 AND title IS NOT NULL
-               AND path IN (SELECT page FROM views WHERE host = ?1 AND day >= ?2
-                            UNION SELECT source FROM views WHERE host = ?1 AND day >= ?2)`,
-        ).bind(host, firstDay),
         // Filtered, visitors per day; unfiltered, they're summed from `views`.
         byFilter ? env.DB.prepare(byFilter.daily).bind(...byFilter.params) : null,
     ].filter((s) => s !== null))) as [
@@ -121,8 +109,6 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
         D1Result<PageDayRow>,
         D1Result<SourceDayRow>,
         D1Result<PeopleRow>,
-        D1Result<SourceInfoRow>,
-        D1Result<PageTitleRow>,
         ...D1Result[],
     ];
     const visitorsByDay = filteredDaily as D1Result<{ day: number; visitors: number }> | undefined;
@@ -170,14 +156,29 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
         if (!s) bySource.set(r.source, (s = { source: r.source, ...noNumbers() }));
         add(s, r);
     }
+    // What's been read from pages (schema.sql), for exactly the rows above:
+    // the site's icon, other sites' names and icons (not the well-known
+    // ones', which have none), and pages' titles, for their rows and for
+    // the referrers they are when clicked through from. Each list is one
+    // JSON parameter, and each lookup reads only the rows it finds.
+    const sourceKeys = [...bySource.keys()];
+    const domains = [host, ...sourceKeys.filter((s) => !s.startsWith("/") && !isWellKnown(s))];
+    const paths = [...new Set([...byPage.keys(), ...sourceKeys.filter((s) => s.startsWith("/"))])];
+    const [sourceInfo, titles] = (await env.DB.batch([
+        env.DB.prepare(
+            `SELECT domain, name, icon_ts AS icon FROM sources WHERE domain IN (SELECT value FROM json_each(?1))`,
+        ).bind(JSON.stringify(domains)),
+        env.DB.prepare(
+            `SELECT path, title FROM pages
+             WHERE host = ?1 AND path IN (SELECT value FROM json_each(?2)) AND title IS NOT NULL`,
+        ).bind(host, JSON.stringify(paths)),
+    ])) as [D1Result<SourceInfoRow>, D1Result<PageTitleRow>];
     for (const r of sourceInfo.results) {
         if (r.domain === host && r.icon !== null) result.icon = r.icon;
         const s = bySource.get(r.domain);
         if (s && r.name) s.name = r.name;
         if (s && r.icon !== null) s.icon = r.icon;
     }
-    // A page's title, on its row and as the name of the referrer it is when
-    // clicked through from.
     for (const r of titles.results) {
         const p = byPage.get(r.path);
         if (p) p.title = r.title;
