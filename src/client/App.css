@@ -142,13 +142,54 @@ main {
 /* ---- Sidebar ---- */
 
 /* Hosts are spaced by their own padding, not a gap or the sidebar's; the
-   rest of the sidebar is inset to match. */
+   rest of the sidebar is inset to match. At least the screen's height, not
+   the page's, so the shortcuts at its end are on the first screen. */
 .sidebar {
   --item-pad: 0.75rem; /* each host's side padding */
+  --count: 2.6rem; /* each host's numbers, wide enough for "99.9k" */
+  --count-gap: 0.6rem;
   display: flex;
   flex-direction: column;
+  align-self: start;
   min-width: 0;
-  padding: 2rem calc(1.75rem - var(--item-pad)) 3.75rem;
+  min-height: 100vh;
+  padding: 1.5rem calc(1.75rem - var(--item-pad)); /* the shortcuts as near the bottom as the intro is the top */
+}
+
+/* The keyboard shortcuts, at the sidebar's end (at least 2rem below the
+   hosts): a key or two, then what it does, one under another. */
+.shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem; /* between the groups */
+  margin-top: auto;
+  padding-top: 2rem;
+}
+
+/* Inset like the intro, so they line up. */
+.shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-inline: var(--item-pad);
+  font-size: 0.8rem;
+}
+
+.shortcut {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: baseline;
+}
+
+.shortcut-keys {
+  display: flex;
+  gap: 0.25rem;
+}
+
+kbd {
+  font: inherit;
+  font-weight: 600;
 }
 
 /* The intro, then a link to the code, or the day hovered on the hosts'
@@ -209,8 +250,6 @@ h1 {
 }
 
 .host-nums {
-  --count: 2.6rem; /* each number, wide enough for "99.9k" */
-  --count-gap: 0.6rem;
   display: grid;
   /* The numbers in a fixed-width cell, so every host's sparkline starts in
      the same place. */
@@ -220,7 +259,8 @@ h1 {
   align-items: last baseline;
 }
 
-/* Each number in a fixed width too, so they line up from host to host. */
+/* Each number in a fixed width too, so they line up from host to host (and
+   with the day's totals above them). */
 .host-counts {
   display: flex;
   gap: var(--count-gap);
@@ -250,7 +290,7 @@ h1 {
 .panel {
   --pad: 2.5rem; /* side padding, which the big chart bleeds through */
   min-width: 0;
-  padding: 2rem var(--pad) 5rem;
+  padding: 1.5rem var(--pad) 0;
   background: var(--surface);
 }
 
@@ -301,8 +341,9 @@ h1 {
   margin-top: 2.5rem;
 }
 
+/* The last thing in the panel, so its fill reaches the panel's bottom. */
 .people > .chart {
-  margin-block: 1rem;
+  margin-top: 1rem;
 }
 
 .people-head {
@@ -538,7 +579,7 @@ select option {
   column-gap: var(--gap);
   justify-content: space-between;
   align-items: start;
-  margin-top: 2.5rem;
+  margin-top: 2rem;
 }
 
 .referrers,
@@ -580,7 +621,7 @@ select option {
 }
 
 /* A row's name and its address or path, one over the other, the second
-   shown instead while the row is hovered. */
+   shown instead while "," has switched the lists to addresses (.address). */
 .swap {
   display: grid;
 }
@@ -592,13 +633,18 @@ select option {
   text-overflow: ellipsis;
 }
 
-.swap > .on-hover,
-.row:hover .swap > :not(.on-hover) {
+.swap > .address-form,
+.stats.address .swap > :not(.address-form) {
   visibility: hidden;
 }
 
-.row:hover .swap > .on-hover {
+.stats.address .swap > .address-form {
   visibility: visible;
+}
+
+/* A hovered row on the page's background, out of the panel's. */
+.row:hover {
+  background: var(--bg);
 }
 
 /* The row filtered by: no bar, which would only show it's all of what's
@@ -672,7 +718,7 @@ select option {
 .spark {
   display: flex;
   align-items: center;
-  padding-bottom: 8px;
+  padding-bottom: 4px;
   width: var(--spark);
 }
 
@@ -686,7 +732,9 @@ select option {
   flex-wrap: wrap;
   justify-content: flex-end;
   min-height: var(--slot); /* one row of squares, kept even when there are none */
+  width: fit-content; /* as wide as its squares, so its focus outline is too */
   margin-top: 1rem;
+  margin-left: auto; /* on the right */
   margin-right: calc((var(--square) - var(--slot)) / 2); /* the last square's edge in line */
 }
 
@@ -710,9 +758,15 @@ select option {
   background: var(--text);
 }
 
-/* No focus outline: focus is always on the current page, already filled. */
+/* No focus outline on a button: focus is always on the current page, already
+   filled. The pager as a whole has it instead, as any focused element does. */
 .pager button:focus-visible {
   outline: none;
+}
+
+.pager:has(:focus-visible) {
+  outline: 1px solid var(--text);
+  outline-offset: 0;
 }
 
 .pager button:not(.current):hover::before {
@@ -735,6 +789,17 @@ select option {
 
   .sidebar-top {
     grid-column: 1 / -1;
+  }
+
+  /* No keyboard to speak of, so no shortcuts, and no room kept for them;
+     room under the hosts instead, before the panel. */
+  .sidebar {
+    min-height: 0;
+    padding-bottom: 3.75rem;
+  }
+
+  .shortcuts {
+    display: none;
   }
 
   .panel {

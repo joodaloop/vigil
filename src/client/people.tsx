@@ -69,6 +69,7 @@ export function People(props: {
       <Chart
         days={props.days}
         lines={[
+          { values: props.stats.daily.visitors, color: theme.stats.visitors, scale: "count", area: true, light: true },
           { values: props.stats.daily.visitors, color: theme.stats.visitors, scale: "count" },
         ]}
         height={120}

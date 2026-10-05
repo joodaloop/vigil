@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, flush, For, onSettled, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import type { PageRow, Referrer } from "../shared/types";
 import { referrerIcon, referrerName } from "../shared/referrers";
@@ -7,7 +7,7 @@ import { num, pct, share } from "./format";
 import { SourceIcon } from "./icons";
 import { theme } from "./theme";
 
-// Pages by views; picking one filters by it.
+// Pages by views; picking one filters by it. The number keys pick its pages.
 export function Pages(props: {
   items: PageRow[];
   rows: number; // the list's rows unfiltered, for its height
@@ -19,6 +19,7 @@ export function Pages(props: {
   return (
     <List
       class="pages"
+      pageKeys={[..."1234567890"]}
       items={props.items}
       rows={props.rows}
       key={(p) => p.path}
@@ -30,11 +31,10 @@ export function Pages(props: {
       label={(p) => {
         // "/posts/x/" shows as "/posts/x"; the home page stays "/".
         const path = p.path.replace(/(.)\/+$/, "$1");
-        // Its title, if it's been read, with the path shown instead while
-        // hovered, without its leading "/" ("posts/x"; the home page stays
-        // "/").
+        // Its title, if it's been read, with the path shown instead after
+        // ",", without its leading "/" ("posts/x"; the home page stays "/").
         return p.title ? (
-          <Swap text={p.title} hover={path.replace(/^\/(.)/, "$1")} />
+          <Swap text={p.title} address={path.replace(/^\/(.)/, "$1")} />
         ) : (
           <span class="label" title={path}>
             {path}
@@ -46,7 +46,8 @@ export function Pages(props: {
 }
 
 // Referrers by new visitors, then views; picking one filters by it. Each
-// shows its address in place of its name while hovered.
+// shows its address in place of its name after ",". The keys q to p pick
+// its pages.
 export function Referrers(props: {
   items: Referrer[];
   rows: number; // the list's rows unfiltered, for its height
@@ -60,6 +61,7 @@ export function Referrers(props: {
   return (
     <List
       class="referrers"
+      pageKeys={[..."qwertyuiop"]}
       byNew
       items={props.items}
       rows={props.rows}
@@ -77,7 +79,7 @@ export function Referrers(props: {
             site={r.source.startsWith("/") ? props.host : r.source}
             saved={r.source.startsWith("/") ? props.icon : r.icon}
           />
-          <Swap text={r.name ?? referrerName(r.source)} hover={address(r.source, props.host)} />
+          <Swap text={r.name ?? referrerName(r.source)} address={address(r.source, props.host)} />
         </span>
       )}
     />
@@ -101,6 +103,7 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
   key: (item: T) => string;
   blank: (key: string) => T;
   byNew?: boolean;
+  pageKeys?: string[];
   label: (item: T) => JSX.Element;
   days: number[];
   engaged: boolean;
@@ -136,7 +139,7 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
   const maxes = createMemo(() => ({ count: maxCount() }));
   return (
     <div class={props.class}>
-      <Paged items={items()} key={props.key} offset={offset()} minRows={props.rows}>
+      <Paged items={items()} key={props.key} offset={offset()} minRows={props.rows} pageKeys={props.pageKeys}>
         {(x) => {
           // The row's sparkline, only new when its series is (not when a day
           // is hovered, which leaves it be) or engaged mode changes; a new
@@ -184,24 +187,26 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
   );
 }
 
-// A sparkline's lines: views as a line, or engaged views filled solid.
+// A sparkline's lines: views as a line over a light fill, or engaged views
+// filled solid.
 export const sparkline = (values: number[], engaged: boolean): Line[] => [
+  { values, color: theme.stats.views, scale: "count", area: true, light: !engaged },
   { values, color: theme.stats.views, scale: "count" },
-  ...(engaged ? [{ values, color: theme.stats.views, scale: "count", area: true }] : []),
 ];
 
 // A source's address, without its scheme: a page on the site itself
 // ("blog.example/posts/x"), or the referring site ("someblog.com").
 const address = (source: string, host: string) => (source.startsWith("/") ? host + source : source);
 
-// A row's name (`text`), and in the same place, shown instead while the row
-// is hovered, its address or path (`hover`); each cut short if it has to be,
-// so the address is its tooltip too.
-function Swap(props: { text: string; hover: string }) {
+// A row's name (`text`), and in the same place, shown instead while ","
+// has switched the lists to addresses (.address), its address or path
+// (`address`); each cut short if it has to be, so the address is its tooltip
+// too.
+function Swap(props: { text: string; address: string }) {
   return (
-    <span class="label swap" title={props.hover}>
+    <span class="label swap" title={props.address}>
       <span>{props.text}</span>
-      <span class="on-hover">{props.hover}</span>
+      <span class="address-form">{props.address}</span>
     </span>
   );
 }
@@ -222,14 +227,19 @@ const noViews = (days: number[]) => ({
 // data changes. Whenever the rows come in another order (a day hovered,
 // another site or period), it's back to the first page. `offset` leaves that
 // many empty rows above the first.
-// The page buttons are one tab stop, the current page's: arrow keys, Home
-// and End move between pages from there.
+// From a row, the up and down arrows move to the row above and below, on
+// through to the pages before and after. The page buttons are one tab stop,
+// the current page's: the up and down arrows move between pages from there
+// (left and right are the main chart's). Anywhere on the page but a text
+// field, the nth of `pageKeys` picks the nth page, if there is one ("" for
+// none), and focuses its first row.
 function Paged<T>(props: {
   items: T[];
   size?: number;
   key: (item: T) => string;
   offset?: number; // empty rows above the first
   minRows?: number; // the fewest rows' height it takes, up to a page (all of one, by default)
+  pageKeys?: string[];
   children: (item: () => T) => JSX.Element;
 }) {
   const size = () => props.size ?? 10;
@@ -240,30 +250,56 @@ function Paged<T>(props: {
   const current = () => (picked().order === order() ? picked().page : 0);
   const setPage = (page: number) => setPicked({ order: order(), page });
   const start = () => current() * size();
-  const onKeyDown = (e: KeyboardEvent & { currentTarget: HTMLElement }) => {
-    const to = {
-      ArrowLeft: current() - 1,
-      ArrowUp: current() - 1,
-      ArrowRight: current() + 1,
-      ArrowDown: current() + 1,
-      Home: 0,
-      End: pages() - 1,
-    }[e.key];
-    if (to === undefined) return;
+  let rows!: HTMLDivElement;
+  const onRowKey = (e: KeyboardEvent) => {
+    const by = { ArrowUp: -1, ArrowDown: 1 }[e.key];
+    if (by === undefined || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    const shown = [...rows.children] as HTMLElement[];
+    const at = shown.indexOf((e.target as Element).closest(".paged > *") as HTMLElement);
+    if (at < 0) return;
     e.preventDefault(); // or the arrows would scroll the page
-    const next = Math.max(0, Math.min(to, pages() - 1));
+    const to = at + by;
+    if (to >= 0 && to < shown.length) return shown[to].focus();
+    // Past the page's first or last row: the next page's first, or the
+    // previous page's last.
+    const page = current() + by;
+    if (page < 0 || page >= pages()) return;
+    setPage(page);
+    flush(); // so the page's rows are there to focus
+    const next = (by > 0 ? rows.firstElementChild : rows.lastElementChild) as HTMLElement | null;
+    next?.focus();
+  };
+  const onPagerKey = (e: KeyboardEvent & { currentTarget: HTMLElement }) => {
+    const by = { ArrowUp: -1, ArrowDown: 1 }[e.key];
+    if (by === undefined || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    e.preventDefault(); // or the arrows would scroll the page
+    const next = Math.max(0, Math.min(current() + by, pages() - 1));
     setPage(next);
     (e.currentTarget.children[next] as HTMLElement | undefined)?.focus();
   };
+  onSettled(() => {
+    if (!props.pageKeys) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.defaultPrevented || e.repeat) return;
+      if ((e.target as Element).closest("input, textarea, [contenteditable]")) return;
+      const page = props.pageKeys!.indexOf(e.key);
+      if (page < 0 || page >= pages()) return;
+      setPage(page);
+      flush(); // so the page's rows are there to focus
+      (rows.firstElementChild as HTMLElement | null)?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   return (
     <>
-      <div class="paged" style={{ "--rows": Math.min(size(), props.minRows ?? size()), "--offset": props.offset ?? 0 }}>
+      <div ref={rows} class="paged" onKeyDown={onRowKey} style={{ "--rows": Math.min(size(), props.minRows ?? size()), "--offset": props.offset ?? 0 }}>
         <For each={props.items.slice(start(), start() + size())} keyed={props.key}>
           {(item) => props.children(item)}
         </For>
       </div>
-      <div class="pager" onKeyDown={onKeyDown}>
+      <div class="pager" onKeyDown={onPagerKey}>
         <Show when={pages() > 1}>
           <For each={Array.from({ length: pages() }, (_, i) => i)}>
             {(i) => (

@@ -33,7 +33,10 @@ const chartPadding = (lineWidth: number) => Math.ceil(lineWidth);
 // stays marked and reported, whatever the pointer does, until another day is
 // clicked (pinning that one instead), it is clicked again, or the days
 // change to ones without it (another period that doesn't reach it); unless
-// `pinnable` is false, when clicks are left alone.
+// `pinnable` is false, when clicks are left alone. While a day is pinned,
+// the left and right arrows move the pin to the day before and after (round
+// from one end to the other); while
+// none is, right pins the first day and left the last. Escape unpins it.
 //
 // `marked` marks a day chosen elsewhere (e.g. on another chart) with dots
 // on the lines alone.
@@ -139,15 +142,20 @@ export function Chart(props: {
         hover(null);
     }
 
-    // Pins the day clicked (moving the pin there if another is pinned), or
-    // if it's the pinned one, unpins it and goes back to following the
-    // pointer. The day is the click's own, as a tap has already cleared the
-    // hover.
     function onClick(e: MouseEvent) {
+        // A tap pins on lifting (see onUp); this is its click, if any.
+        if (performance.now() - tappedAt < 1000) return;
+        pin(e.clientX);
+    }
+
+    // Pins the day at clientX (moving the pin there if another is pinned),
+    // or if it's the pinned one, unpins it and goes back to following the
+    // pointer. The day is the click's or tap's own, not the hovered one.
+    function pin(clientX: number) {
         if (!plot || !props.onHover || props.days.length === 0 || props.pinnable === false) return;
         resetHoverDelay();
         hoverReady = true;
-        const i = dayAt(plot, e);
+        const i = dayAt(plot, { clientX });
         if (pinned() === i) {
             // Back to hovering it (not through onMove, which would still
             // read it as pinned until the next flush).
@@ -162,6 +170,55 @@ export function Chart(props: {
         }
     }
 
+    // Moves the pin `by` days, past either end round to the other; or with
+    // none pinned, pins the first day (moving later) or the last (moving
+    // earlier). Whether it could (this chart pins).
+    function movePin(by: number) {
+        if (!plot || !props.onHover || props.days.length === 0 || props.pinnable === false) return false;
+        const from = pinned();
+        const n = props.days.length;
+        const i = from === null ? (by > 0 ? 0 : n - 1) : (((from + by) % n) + n) % n;
+        if (i === from) return true;
+        setPinned(i);
+        pinnedDay = props.days[i];
+        markDay(plot, i, true);
+        hover(i);
+        return true;
+    }
+
+    function unpin() {
+        if (pinned() === null) return;
+        setPinned(null);
+        pinnedDay = null;
+        setMark(null);
+        hover(null);
+    }
+
+    // Touch and pen pin on lifting rather than on the click after: iOS
+    // Safari drops a tap's click when the tap changes what's shown (as
+    // marking its day does). A drag isn't a tap, and pins nothing.
+    let tapX: number | null = null;
+    let tappedAt = -Infinity;
+
+    function onDown(e: PointerEvent) {
+        tapX = e.pointerType === "mouse" ? null : e.clientX;
+        onMove(e);
+    }
+
+    function onUp(e: PointerEvent) {
+        if (tapX === null) return;
+        const tap = Math.abs(e.clientX - tapX) < 10;
+        tapX = null;
+        if (!tap) return;
+        tappedAt = performance.now();
+        pin(e.clientX);
+    }
+
+    function onCancel() {
+        tapX = null;
+        onLeave();
+    }
+
     // After every redraw (new data, a resize), the pinned day is re-marked
     // where it now is among the days, or unpinned if they don't have it.
     function redrawn(u: uPlot) {
@@ -173,10 +230,7 @@ export function Chart(props: {
             markDay(u, i, true);
             hover(i);
         } else {
-            setPinned(null);
-            pinnedDay = null;
-            setMark(null);
-            hover(null);
+            unpin();
         }
     }
 
@@ -237,9 +291,21 @@ export function Chart(props: {
     onSettled(() => {
         const observer = new ResizeObserver(() => plot?.setSize({ width: el.clientWidth, height: height() }));
         observer.observe(el);
+        // Anywhere but a text field or the period's select (whose own the
+        // arrows are), and not when something else has taken the key.
+        const onKey = (e: KeyboardEvent) => {
+            if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.defaultPrevented) return;
+            if ((e.target as Element).closest("input, textarea, select, [contenteditable]")) return;
+            const by = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+            if (by !== undefined) {
+                if (movePin(by)) e.preventDefault();
+            } else if (e.key === "Escape") unpin();
+        };
+        window.addEventListener("keydown", onKey);
         return () => {
             resetHoverDelay();
             observer.disconnect();
+            window.removeEventListener("keydown", onKey);
             plot?.destroy();
         };
     });
@@ -270,10 +336,11 @@ export function Chart(props: {
             // Touch: a finger down shows its day, dragging sideways moves
             // through days, lifting it (or a scroll taking over) clears it.
             onPointerEnter={onMove}
-            onPointerDown={onMove}
+            onPointerDown={onDown}
             onPointerMove={onMove}
+            onPointerUp={onUp}
             onPointerLeave={onLeave}
-            onPointerCancel={onLeave}
+            onPointerCancel={onCancel}
             onClick={onClick}
         >
             <div ref={el} class="chart-plot" />

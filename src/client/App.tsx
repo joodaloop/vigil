@@ -17,6 +17,8 @@ import { DEFAULT_PERIOD } from "./config";
 import { fullDate, num, pct } from "./format";
 import { Pages, Referrers, sparkline } from "./lists";
 import { People } from "./people";
+import { Shortcuts } from "./shortcuts";
+import { storedFlag } from "./stored";
 import { theme } from "./theme";
 
 // Each filter's pick, or null for none; set by picking a row in a list (or
@@ -110,8 +112,8 @@ export function App(props: { sites: Site[] }) {
   });
   // Engaged mode: views shown as engaged ones (reads) instead, in the lists,
   // the sidebar and the main chart; turned on and off by clicking the
-  // "engaged" total.
-  const [engaged, setEngaged] = createSignal(false);
+  // "engaged" total, and remembered in this browser.
+  const [engaged, setEngaged] = storedFlag("vigil:engaged", false);
   // The sidebar's hosts, most views in the period first, or in engaged mode,
   // most engaged views (ties keep site order). A hovered day doesn't
   // reorder them.
@@ -126,6 +128,9 @@ export function App(props: { sites: Site[] }) {
   // among their days, so it's never one they don't have. The main chart's
   // day doesn't reach the sidebar.
   const [hoveredDay, setHoveredDay] = createSignal<number | null>(null);
+  // Every host's count that day, added up.
+  const dayTotal = (k: "views" | "reads" | "new") =>
+    Object.values(summaries().hosts).reduce((n, h) => n + (h.daily[k][sidebarDay()!] ?? 0), 0);
   const sidebarDay = () => {
     const i = hoveredDay() === null ? -1 : summaries().days.indexOf(hoveredDay()!);
     return i < 0 ? null : i;
@@ -148,6 +153,24 @@ export function App(props: { sites: Site[] }) {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   });
+  // Escape twice in quick succession focuses the sidebar's first host (that
+  // can be opened), anywhere but a text field.
+  let escapedAt = -Infinity;
+  onSettled(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if ((e.target as Element).closest("input, textarea, [contenteditable]")) return;
+      const now = performance.now();
+      if (now - escapedAt < 400) {
+        escapedAt = -Infinity;
+        document.querySelector<HTMLElement>(".sidebar .host-name:not(:disabled)")?.focus();
+      } else {
+        escapedAt = now;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   // Nothing is shown until both the sidebar and the panel have their first
   // numbers, so they arrive together.
@@ -167,11 +190,12 @@ export function App(props: { sites: Site[] }) {
               .
             </p>
             {/* The day hovered on the sidebar's charts, in its place while
-                there is one. */}
+                there is one, with every host's views (or engaged views) and
+                new visitors that day added up. */}
             <Show
               when={sidebarDay() !== null}
               fallback={
-                <p style={{ "text-align": "right", "font-weight": 600 }}>
+                <p style={{ "font-weight": 600 }}>
                   Clone it on{" "}
                   <a
                     style={{ color: "inherit", "text-underline-offset": "3px" }}
@@ -183,7 +207,11 @@ export function App(props: { sites: Site[] }) {
                 </p>
               }
             >
-              <p style={{ "text-align": "right", "font-weight": 600 }}>
+              <p style={{ display: "flex", "justify-content": "space-between", "font-weight": 600 }}>
+                <span class="host-counts">
+                  <span style={{ color: theme.stats.views }}>{num(dayTotal(engaged() ? "reads" : "views"))}</span>
+                  <span style={{ color: theme.stats.new }}>{num(dayTotal("new"))}</span>
+                </span>
                 {dateOf(summaries().days[sidebarDay()!] * 1000)}
               </p>
             </Show>
@@ -242,6 +270,7 @@ export function App(props: { sites: Site[] }) {
               }}
             </For>
           </Errored>
+          <Shortcuts />
         </nav>
 
         <section class={["panel", { updating: updating() }]}>
@@ -298,7 +327,7 @@ function Stats(props: {
   onPeriod: (days: number, ago: number) => void; // a period picked (see periods)
   updating: boolean; // new stats on their way
   engaged: boolean; // engaged mode (see App)
-  onEngaged: () => void; // a click on the engaged total, turning it on or off
+  onEngaged: () => void; // a click on the engaged total (or "/"), turning it on or off
 }) {
   const t = () => props.stats.totals;
   // The day hovered on the chart, and the stats as of it, which the totals
@@ -313,24 +342,38 @@ function Stats(props: {
   // In engaged mode, the lists ranked by engaged views instead.
   const shown = createMemo(() => onDay(props.stats, day(), props.engaged));
   const st = () => shown().totals;
-  // "." switches the numbers to percentages and back, and the left and right
-  // arrows pick the period before and after this one; anywhere but a text
-  // field, where they'd type or move the caret, and not when something else
-  // has taken the key (the pager's arrows). While new stats load, the arrows
-  // do nothing, as they'd only pick from the period still shown.
-  const [asPct, setAsPct] = createSignal(false);
+  // "." switches the numbers to percentages and back, "," the lists' names
+  // to their addresses and paths and back, "/" engaged mode on and off,
+  // Backspace clears every filter, "[" and "]" pick the period before and
+  // after this one, and "\" the most recent; anywhere but a text field,
+  // where they'd type or move the caret, and not when something else has
+  // taken the key. While new stats load, "[" and "]" do nothing, as they'd
+  // only pick from the period still shown.
+  // Both remembered in this browser.
+  const [asPct, setAsPct] = storedFlag("vigil:percentages", false);
+  const [asAddress, setAsAddress] = storedFlag("vigil:addresses", false);
   onSettled(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
       if ((e.target as Element).closest("input, textarea, [contenteditable]")) return;
       if (e.key === "." && !e.repeat) {
         setAsPct((p) => !p);
-      } else if (!e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      } else if (e.key === "," && !e.repeat) {
+        setAsAddress((a) => !a);
+      } else if (e.key === "/" && !e.repeat) {
+        e.preventDefault(); // or Firefox opens its quick find
+        props.onEngaged();
+      } else if (e.key === "Backspace" && !e.repeat && !e.shiftKey) {
+        const f = props.filters;
+        if (f.page === null && f.source === null && f.country === null) return;
+        e.preventDefault();
+        props.onFilter({ page: null, source: null, country: null });
+      } else if (!e.shiftKey && (e.key === "[" || e.key === "]" || e.key === "\\")) {
         // Most recent first, so earlier is further down the list. A period
         // not in it goes to the most recent.
         const list = periods();
         const i = list.findIndex((p) => p.key === periodKey(props.days.length, props.ago));
-        const to = i < 0 ? 0 : i + (e.key === "ArrowLeft" ? 1 : -1);
+        const to = e.key === "\\" || i < 0 ? 0 : i + (e.key === "[" ? 1 : -1);
         if (to < 0 || to >= list.length || to === i) return;
         e.preventDefault();
         if (props.updating) return;
@@ -343,7 +386,7 @@ function Stats(props: {
   });
 
   return (
-    <div class={["stats", { pct: asPct() }]}>
+    <div class={["stats", { pct: asPct(), address: asAddress() }]}>
       <div class="stats-main">
         {/* Name and address on the left, totals on the right. */}
         <div class="stats-head">
@@ -427,24 +470,22 @@ function Stats(props: {
 
         <Chart
           days={props.days}
-          lines={[
-            // Engaged views, filled, under the lines: light alongside the
-            // others, solid on their own.
-            {
-              values: props.stats.daily.reads,
-              color: theme.stats.views,
-              scale: "count",
-              area: true,
-              light: !props.engaged,
-            },
-            // Views and new visitors, or in engaged mode, engaged views alone.
-            ...(props.engaged
-              ? [{ values: props.stats.daily.reads, color: theme.stats.views, scale: "count" }]
+          lines={
+            // Views and new visitors, each over a light fill (both fills under
+            // both lines); or in engaged mode, engaged views alone, filled
+            // solid.
+            props.engaged
+              ? [
+                  { values: props.stats.daily.reads, color: theme.stats.views, scale: "count", area: true },
+                  { values: props.stats.daily.reads, color: theme.stats.views, scale: "count" },
+                ]
               : [
+                  { values: props.stats.daily.views, color: theme.stats.views, scale: "count", area: true, light: true },
+                  { values: props.stats.daily.new, color: theme.stats.new, scale: "count", area: true, light: true },
                   { values: props.stats.daily.views, color: theme.stats.views, scale: "count" },
                   { values: props.stats.daily.new, color: theme.stats.new, scale: "count" },
-                ]),
-          ]}
+                ]
+          }
           height={160}
           headroom={8}
           lineWidth={2}
@@ -525,10 +566,10 @@ function dayOf(ms: number, withMonth: boolean): string {
   return `${withMonth ? `${day} ${month.format(ms)}` : day}, ${weekday.format(ms)}`;
 }
 
-// "15th August 2026": a day hovered on the sidebar's charts.
+// "15th August": a day hovered on the sidebar's charts.
 function dateOf(ms: number): string {
   const d = new Date(ms).getUTCDate();
-  return `${d}${SUFFIX[ordinal.select(d)]} ${month.format(ms)} ${new Date(ms).getUTCFullYear()}`;
+  return `${d}${SUFFIX[ordinal.select(d)]} ${month.format(ms)}`;
 }
 
 // The stats as of a day hovered on the main chart (`day`), or the period's:
