@@ -172,14 +172,14 @@ export function App(props: { sites: Site[] }) {
               when={sidebarDay() !== null}
               fallback={
                 <p style={{ "text-align": "right", "font-weight": 600 }}>
-                  Source available on{" "}
+                  Clone it on{" "}
                   <a
                     style={{ color: "inherit", "text-underline-offset": "3px" }}
                     href="https://github.com/joodaloop/vigil"
                   >
                     Github
-                  </a>
-                  .
+                  </a>{" "}
+                  to use it.
                 </p>
               }
             >
@@ -204,14 +204,17 @@ export function App(props: { sites: Site[] }) {
                   return i === null ? (s()?.totals[k] ?? 0) : (s()?.daily[k][i] ?? 0);
                 };
                 return (
-                  <button
-                    class="host-item"
-                    aria-pressed={open() ? "true" : "false"}
-                    title={h.host}
-                    disabled={empty()}
-                    onClick={() => open() || update({ host: h.host })}
-                  >
-                    <span class="host-name">{h.name}</span>
+                  <div class="host-item">
+                    {/* Only the name opens it. */}
+                    <button
+                      class="host-name"
+                      aria-pressed={open() ? "true" : "false"}
+                      title={h.host}
+                      disabled={empty()}
+                      onClick={() => open() || update({ host: h.host })}
+                    >
+                      {h.name}
+                    </button>
                     <Show when={!empty()} fallback={<span class="muted">No stats yet</span>}>
                       <span class="host-nums">
                         <span class="host-counts">
@@ -226,7 +229,7 @@ export function App(props: { sites: Site[] }) {
                             (engaged() ? s()?.daily.reads : s()?.daily.views) ?? [],
                             engaged(),
                           )}
-                          height={20}
+                          height={24}
                           lineWidth={1.5}
                           marked={sidebarDay()}
                           onHover={(i) => setHoveredDay(i === null ? null : summaries().days[i])}
@@ -234,7 +237,7 @@ export function App(props: { sites: Site[] }) {
                         />
                       </span>
                     </Show>
-                  </button>
+                  </div>
                 );
               }}
             </For>

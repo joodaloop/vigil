@@ -141,8 +141,8 @@ main {
 
 /* ---- Sidebar ---- */
 
-/* Hosts are spaced by their own padding, not a gap or the sidebar's, so
-   their whole area is clickable; the rest of the sidebar is inset to match. */
+/* Hosts are spaced by their own padding, not a gap or the sidebar's; the
+   rest of the sidebar is inset to match. */
 .sidebar {
   --item-pad: 0.75rem; /* each host's side padding */
   display: flex;
@@ -181,9 +181,31 @@ h1 {
   padding: 0.85rem var(--item-pad);
 }
 
+/* The name, which opens the host: as wide as its text, on light grey while
+   hovered (as the period is), or for the open host, inverted. Its padding
+   reaches past the text, pulled back by its margin so the text stays in
+   line. */
 .host-name {
+  align-self: flex-start;
+  max-width: calc(100% + 12px);
+  padding: 0 6px 2px;
+  margin: 0 -6px -2px;
   font-size: 1.15rem;
   font-weight: 600;
+}
+
+.host-name:not(:disabled, [aria-pressed="true"]):hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.host-name[aria-pressed="true"] {
+  color: var(--bg);
+  background: var(--text);
+}
+
+/* Its background is the focus outline's colour: a gap keeps that seen. */
+.host-name[aria-pressed="true"]:focus-visible {
+  outline-offset: 1px;
 }
 
 .host-nums {
@@ -213,6 +235,10 @@ h1 {
    An inline block's baseline is its bottom margin edge, so the negative
    margin pulls the plot down through its padding (Chart's ceil(lineWidth)),
    toward its zero line. */
+.host-nums .chart {
+  cursor: default; /* hovering only: clicking it does nothing */
+}
+
 .host-nums .chart-plot {
   display: inline-block;
   width: 100%;

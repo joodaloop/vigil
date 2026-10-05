@@ -31,9 +31,10 @@ export function Pages(props: {
         // "/posts/x/" shows as "/posts/x"; the home page stays "/".
         const path = p.path.replace(/(.)\/+$/, "$1");
         // Its title, if it's been read, with the path shown instead while
-        // hovered.
+        // hovered, without its leading "/" ("posts/x"; the home page stays
+        // "/").
         return p.title ? (
-          <Swap text={p.title} hover={path} />
+          <Swap text={p.title} hover={path.replace(/^\/(.)/, "$1")} />
         ) : (
           <span class="label" title={path}>
             {path}
