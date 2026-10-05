@@ -419,7 +419,14 @@ select option {
   font-size: 0.9rem;
 }
 
-/* Each .alt-form shows in place of its .main-form while space has switched
+/* Stats only known for the whole period, while a day's shown (`inert`):
+   see-through rather than removed, so nothing moves, and rather than
+   hidden, which a .alt-form inside would undo. */
+.period-only[inert] {
+  opacity: 0;
+}
+
+/* Each .alt-form shows in place of its .main-form while "." has switched
    the numbers to percentages (.pct). Hidden rather than removed, so each
    keeps its width either way. */
 .alt-form {
@@ -478,7 +485,7 @@ select option {
 }
 
 /* A share's percentage, in its bar's cell, shown instead of the bar while
-   space has switched the numbers to percentages. */
+   "." has switched the numbers to percentages. */
 .icons .bar,
 .icons .pct {
   grid-area: 1 / 2;

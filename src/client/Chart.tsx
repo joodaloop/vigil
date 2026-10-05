@@ -199,10 +199,14 @@ export function Chart(props: {
             scales[line.scale] ??= {
                 range: (_u, _min, max) => [0, scaleTop(fixed ?? max)],
             };
+            // A fill reaches half a line's width below the baseline, as far
+            // as a line along it does, so the two end level. (Its width,
+            // though nothing's stroked, keeps uPlot from clipping it there.)
             series.push({
                 scale: line.scale,
                 stroke: line.area ? "transparent" : line.color,
-                width: line.area ? 0 : props.lineWidth,
+                width: props.lineWidth,
+                fillTo: line.area ? (u) => u.posToVal(u.valToPos(0, line.scale) + props.lineWidth / 2, line.scale) : undefined,
                 fill: line.area ? (line.light ? `${line.color}26` : line.color) : undefined, // 26: 15% opaque
                 points: { show: false },
             });

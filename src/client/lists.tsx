@@ -282,7 +282,7 @@ function Paged<T>(props: {
 }
 
 // A list's number, with its share of the list's total in the same place,
-// shown instead once space switches to percentages. `blankZero` leaves both
+// shown instead once "." switches to percentages. `blankZero` leaves both
 // empty for none.
 function Count(props: { n: number; total: number; blankZero?: boolean }) {
   return (

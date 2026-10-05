@@ -245,6 +245,7 @@ export function App(props: { sites: Site[] }) {
               onFilter={update}
               ago={view().q.ago}
               onPeriod={(days, ago) => update({ days, ago })}
+              updating={updating()}
               onDay={setHoveredDay}
               engaged={engaged()}
               onEngaged={() => setEngaged((on) => !on)}
@@ -268,6 +269,7 @@ function Stats(props: {
   onFilter: (change: Partial<Filters>) => void;
   ago: number; // how many days before today the period ends
   onPeriod: (days: number, ago: number) => void; // a period picked (see periods)
+  updating: boolean; // new stats on their way
   onDay: (day: number | null) => void; // the day hovered or pinned, in unix seconds
   engaged: boolean; // engaged mode (see App)
   onEngaged: () => void; // a click on the engaged total, turning it on or off
@@ -285,19 +287,19 @@ function Stats(props: {
   // In engaged mode, the lists ranked by engaged views instead.
   const shown = createMemo(() => onDay(props.stats, day(), props.engaged));
   const st = () => shown().totals;
-  // Space switches the numbers to percentages and back, and shift with the
-  // left and right arrows picks the period before and after this one (but not while a
-  // control has focus, which they'd work instead).
+  // "." switches the numbers to percentages and back, and the left and right
+  // arrows pick the period before and after this one; anywhere but a text
+  // field, where they'd type or move the caret, and not when something else
+  // has taken the key (the pager's arrows). While new stats load, the arrows
+  // do nothing, as they'd only pick from the period still shown.
   const [asPct, setAsPct] = createSignal(false);
   onSettled(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if ((e.target as Element).closest("button, a, select, input, textarea, [contenteditable]"))
-        return;
-      if (e.key === " " && !e.repeat) {
-        e.preventDefault(); // or it would scroll the page
+      if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
+      if ((e.target as Element).closest("input, textarea, [contenteditable]")) return;
+      if (e.key === "." && !e.repeat) {
         setAsPct((p) => !p);
-      } else if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      } else if (!e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         // Most recent first, so earlier is further down the list. A period
         // not in it goes to the most recent.
         const list = periods();
@@ -305,6 +307,7 @@ function Stats(props: {
         const to = i < 0 ? 0 : i + (e.key === "ArrowLeft" ? 1 : -1);
         if (to < 0 || to >= list.length || to === i) return;
         e.preventDefault();
+        if (props.updating) return;
         const [days, ago] = list[to].key.split(" ").map(Number);
         props.onPeriod(days, ago);
       }
@@ -382,9 +385,8 @@ function Stats(props: {
               <div class="big">{num(st().new)}</div>
               <div class="big-label">New devices</div>
               {/* Only known for the whole period, so hidden while a day is
-                  hovered (hidden rather than removed, so the totals keep
-                  their height). */}
-              <div class="sub" style={{ visibility: day() === null ? undefined : "hidden" }}>
+                  hovered (see .period-only). */}
+              <div class="sub period-only" inert={day() !== null}>
                 <span
                   class="count"
                   title={`Bounced: ${num(t().newBounced)} devices that opened one page and never came back`}

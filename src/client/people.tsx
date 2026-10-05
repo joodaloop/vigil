@@ -21,9 +21,8 @@ export function People(props: {
   const t = () => props.stats.totals;
   const devices = () => t().devices;
   // Devices, systems and countries are only known for the whole period, so
-  // they're hidden while a day is (hidden rather than removed, so nothing
-  // moves).
-  const periodOnly = () => ({ visibility: props.day !== null ? ("hidden" as const) : undefined });
+  // they're hidden while a day is (see .period-only).
+  const dayShown = () => props.day !== null;
 
   return (
     <div class="people">
@@ -40,7 +39,7 @@ export function People(props: {
               </div>
             </div>
             {/* Each column most common first. */}
-            <div class="sub stacked icons devices" style={periodOnly()}>
+            <div class="sub stacked icons devices period-only" inert={dayShown()}>
               <For each={[...DEVICES].sort((a, b) => devices()[b.key] - devices()[a.key])}>
                 {(d) => (
                   <span title={`${d.name}: ${pct(devices()[d.key], t().visitors)}%`}>
@@ -51,7 +50,7 @@ export function People(props: {
               </For>
             </div>
             {/* Shares of the visitors whose OS is known. */}
-            <div class="sub stacked icons systems" style={periodOnly()}>
+            <div class="sub stacked icons systems period-only" inert={dayShown()}>
               <For each={[...SYSTEMS].sort((a, b) => t().systems[b[0]] - t().systems[a[0]])}>
                 {([key, name]) => (
                   <span title={`${name}: ${pct(t().systems[key], t().systems.known)}%`}>
@@ -63,7 +62,7 @@ export function People(props: {
             </div>
           </div>
         </div>
-        <div style={periodOnly()}>
+        <div class="period-only" inert={dayShown()}>
           <Countries items={t().countries} picked={props.picked} onPick={props.onPick} />
         </div>
       </div>
@@ -81,7 +80,7 @@ export function People(props: {
 }
 
 // A share as a bar, filled to that fraction of its width, with its percentage
-// in the same place, shown instead while space has switched the numbers to
+// in the same place, shown instead while "." has switched the numbers to
 // percentages.
 function Share(props: { part: number; whole: number }) {
   return (
