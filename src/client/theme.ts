@@ -1,4 +1,5 @@
-// Alabaster by Nikita Prokopov. Colours are #rrggbb, which `tint` in App.tsx relies on.
+// Alabaster by Nikita Prokopov. Colours are #rrggbb, which light fills on
+// charts (Chart.tsx) rely on.
 export const theme = {
   background: "#F7F7F7",
   surface: "#F0F0F0", // line_highlight

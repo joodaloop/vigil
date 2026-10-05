@@ -10,6 +10,10 @@
   --spark: 3rem; /* the lists' sparklines */
 }
 
+::selection {
+  background-color: #0000001a;
+}
+
 * {
   box-sizing: border-box;
   letter-spacing: -0.02em;
@@ -64,6 +68,7 @@ a:focus-visible,
 /* Text that's cut short with "…" when there isn't room. */
 .host-name,
 .host-url,
+.host-dates,
 .label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -89,9 +94,13 @@ main {
   min-width: 0;
 }
 
-/* Sideways drags go to the chart; vertical ones still scroll the page. */
+/* Sideways drags go to the chart; vertical ones still scroll the page.
+   The pointer cursor also lets a tap pin a day on iOS: Safari only lets a
+   tap's click bubble up to Solid's listener on the document from elements
+   it considers clickable. */
 .chart.hoverable {
   touch-action: pan-y;
+  cursor: pointer;
 }
 
 /* Stacking: the pinned day's line, then the drawing (its canvas is
@@ -120,7 +129,14 @@ main {
   height: var(--dot);
   margin: calc(var(--dot) / -2) 0 0 calc(var(--dot) / -2);
   border-radius: 50%;
+  background: var(--color);
   pointer-events: none;
+}
+
+/* A fill's (engaged views'): a ring in its colour, filled with the page's. */
+.chart-dot.ring {
+  border: 2px solid var(--color);
+  background: var(--bg);
 }
 
 /* ---- Sidebar ---- */
@@ -307,8 +323,9 @@ select option {
 }
 
 /* Countries' flags, sized by visitors, set as a line of text so the lines
-   balance when they wrap. Bottoms aligned; each flag has half the 0.4rem gap
-   around it, and the row gives that back at its edges. */
+   balance when they wrap. Bottoms aligned; each flag's button has half the
+   0.4rem gap as padding around it, so the gaps are part of the flags'
+   buttons rather than dead space, and the row gives it back at its edges. */
 .countries {
   min-height: 40px; /* the top flag's height */
   margin: -0.2rem;
@@ -317,10 +334,14 @@ select option {
   text-wrap: balance;
 }
 
-.countries span {
+.countries button {
   display: inline-block;
-  margin: 0.2rem;
+  padding: 0.2rem;
   vertical-align: bottom;
+}
+
+.countries button:hover {
+  opacity: 0.65;
 }
 
 .countries img {
@@ -338,63 +359,9 @@ select option {
   color: var(--muted);
 }
 
-/* Filter menus: the picked option's text each, the select invisible over
-   it (as in the days picker). */
-.filters {
-  display: flex;
-  gap: 1.2rem;
-  margin-top: 0.5rem;
-  line-height: 1; /* no space above and below the text */
-}
-
-.filter-select {
-  position: relative;
-  user-select: none;
-}
-
-/* The country menu: a crossed-out flag shape, or the picked country's flag. */
-.filter-select > span {
-  display: flex;
-  align-items: center;
-  height: 100%;
-}
-
-.filter-flag {
-  display: block;
-  width: 24px;
-  height: 18px;
-}
-
-/* No country picked: a flag's outline, crossed corner to corner. */
-span.filter-flag {
-  border: 1.5px solid var(--muted);
-  background:
-    linear-gradient(
-      to top right,
-      transparent calc(50% - 0.6px),
-      var(--muted) calc(50% - 0.6px) calc(50% + 0.6px),
-      transparent calc(50% + 0.6px)
-    ),
-    linear-gradient(
-      to bottom right,
-      transparent calc(50% - 0.6px),
-      var(--muted) calc(50% - 0.6px) calc(50% + 0.6px),
-      transparent calc(50% + 0.6px)
-    );
-}
-
-.filter-select:has(> select:focus-visible) {
-  outline-offset: 2px;
-}
-
-.filter-select select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  opacity: 0;
-  border: 0;
-  appearance: none;
-  cursor: pointer;
+.host-dates {
+  font-weight: 600;
+  padding-top: 4px;
 }
 
 .totals {
@@ -413,6 +380,37 @@ span.filter-flag {
   white-space: nowrap; /* "100% engaged" is wider than the total: never a second line */
 }
 
+/* The engaged total: a button as wide as its text, that turns engaged mode
+   on and off; on a light version of its blue while hovered, and while it's
+   on, its text in the page's background colour on that blue. Pulled out by
+   its padding so the text stays in line. */
+.engaged-toggle {
+  padding: 0 6px 2px;
+  margin: 0 -6px -2px; /* its padding taken back, so nothing moves */
+}
+
+/* Its right edge stays put, so a changing number only moves its left one:
+   wider than the total, right-aligned text would spill out to the right
+   instead, but a flex row's end-aligned content spills to the left. */
+.stats-head .sub:has(> .engaged-toggle) {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.engaged-toggle:hover {
+  background: color-mix(in srgb, var(--views) 15%, transparent);
+}
+
+.engaged-toggle[aria-pressed="true"] {
+  background: var(--views);
+  color: var(--bg);
+}
+
+/* Engaged views standing in for views (engaged mode). */
+.engaged {
+  font-weight: 600;
+}
+
 /* The number sits close over its label. */
 .big {
   font-size: 1.9rem;
@@ -426,21 +424,18 @@ span.filter-flag {
   font-size: 0.9rem;
 }
 
-/* Each .alt-form shows in place of its .main-form: in the top half (the
-   totals and lists) while space has switched them to percentages (.pct),
-   and in the visitors' totals while hovered. Hidden rather than removed, so
-   each keeps its width either way. */
+/* Each .alt-form shows in place of its .main-form while space has switched
+   the numbers to percentages (.pct). Hidden rather than removed, so each
+   keeps its width either way. */
 .alt-form {
   visibility: hidden;
 }
 
-.stats.pct :is(.stats-head .totals, .pages, .referrers) .main-form,
-.people .totals:hover .main-form {
+.stats.pct .main-form {
   visibility: hidden;
 }
 
-.stats.pct :is(.stats-head .totals, .pages, .referrers) .alt-form,
-.people .totals:hover .alt-form {
+.stats.pct .alt-form {
   visibility: visible;
 }
 
@@ -488,7 +483,7 @@ span.filter-flag {
 }
 
 /* A share's percentage, in its bar's cell, shown instead of the bar while
-   the visitors number or either column is hovered. */
+   space has switched the numbers to percentages. */
 .icons .bar,
 .icons .pct {
   grid-area: 1 / 2;
@@ -517,36 +512,30 @@ span.filter-flag {
   max-width: 22rem;
 }
 
-/* A full page of rows, so a short page is as tall as a full one. */
+/* At least `--rows` rows tall (a full page, or the list's rows unfiltered if
+   fewer), so a short or filtered page keeps the list's height; any empty
+   rows above the first (`--offset`) count towards it. */
 .paged {
   min-height: calc(var(--rows) * var(--row));
-}
-
-/* Page and referrer names are links to them: plain, lightening while
-   hovered, and only as wide as their text. They have side padding, for room
-   around their focus outline, and are pulled out by it so their text stays
-   in line with the rest of the panel. */
-.row a {
-  justify-self: start;
-  max-width: calc(100% + 8px);
-  padding-inline: 4px;
-  margin-inline: -4px;
-  color: inherit;
-  text-decoration: none;
-}
-
-.row a:hover {
-  opacity: 0.65;
+  padding-top: calc(var(--offset) * var(--row));
 }
 
 /* A page or referrer: its name, a sparkline of its views, then its views
-   and new visitors. */
+   and new visitors. A button that filters by it. It has side padding, for
+   room around its focus outline, and is pulled out by it so its text stays
+   in line with the rest of the panel. */
 .row {
+  --row-pad: 4px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--spark) var(--num) var(--num);
+  /* One row the row's height, so everything centres on it, the sparkline
+     (taller, with its padding) overflowing it evenly. */
+  grid-template-rows: 100%;
   align-items: center;
   gap: 0.5rem;
-  width: 100%;
+  width: calc(100% + 2 * var(--row-pad));
+  padding-inline: var(--row-pad);
+  margin-inline: calc(-1 * var(--row-pad));
   height: var(--row);
   font-size: var(--list-text);
 }
@@ -556,35 +545,58 @@ span.filter-flag {
   margin-right: 0.5rem;
 }
 
+/* A row's name and its address or path, one over the other, the second
+   shown instead while the row is hovered. */
+.swap {
+  display: grid;
+}
+
+.swap > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.swap > .on-hover,
+.row:hover .swap > :not(.on-hover) {
+  visibility: hidden;
+}
+
+.row:hover .swap > .on-hover {
+  visibility: visible;
+}
+
+/* The row filtered by: no bar, which would only show it's all of what's
+   left. */
+.row[aria-pressed="true"]::before {
+  content: none;
+}
+
 /* Behind each row's name, a bar as long as its share of the list's views
-   (or new visitors, for referrers); starting a little left of the row and
-   at most filling the name's column, stopping 1rem short of the sparkline.
-   `--tail` is everything after that column: the 1rem, the sparkline, the
-   two numbers and the gaps between them. */
+   (or new visitors, for referrers); starting at the row's edge, a little
+   left of its text, and at most filling the name's column, stopping 1rem
+   short of the sparkline. `--tail` is everything after that column: the
+   1rem, the sparkline, the two numbers, the gaps between them and the row's
+   right padding. */
 .row {
-  --tail: calc(1rem + var(--spark) + 2 * var(--num) + 2 * 0.5rem);
+  --tail: calc(1rem + var(--spark) + 2 * var(--num) + 2 * 0.5rem + var(--row-pad));
   position: relative;
   isolation: isolate;
 }
 
 .row::before {
-  --out: 4px;
   content: "";
   position: absolute;
-  inset: 0 auto 0 calc(-1 * var(--out));
+  inset: 0 auto 0 0;
   z-index: -1;
-  width: calc((100% - var(--tail) + var(--out)) * var(--share, 0));
+  width: calc((100% - var(--tail)) * var(--share, 0));
   background: color-mix(in srgb, var(--views) 10%, transparent);
 }
 
 /* Referrers are ranked by new visitors, so theirs are in its red. */
 .row.by-new::before {
   background: color-mix(in srgb, var(--new) 10%, transparent);
-}
-
-.path {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.92em; /* monospace runs large next to the UI font */
 }
 
 .num {
@@ -605,6 +617,12 @@ span.filter-flag {
   flex-shrink: 0;
   width: 18px; /* the largest icon */
   color: var(--muted);
+}
+
+/* A site's favicon fills its square, where the icons are drawn inset in
+   theirs, so it's inset to look the same size. */
+.source-icon img {
+  padding: 1px;
 }
 
 /* Two forms of a number, one over the other (see .alt-form). */
@@ -658,6 +676,11 @@ span.filter-flag {
   background: var(--text);
 }
 
+/* No focus outline: focus is always on the current page, already filled. */
+.pager button:focus-visible {
+  outline: none;
+}
+
 .pager button:not(.current):hover::before {
   background: linear-gradient(var(--text), var(--text)) center / 4px 4px no-repeat;
 }
@@ -692,17 +715,28 @@ span.filter-flag {
     row-gap: 2.5rem;
   }
 
-  .paged {
-    min-height: unset;
-  }
-
+  /* The totals under the name, still on the right. */
   .stats-head {
     flex-direction: column;
   }
 
+  .stats-head .totals {
+    align-self: flex-end;
+  }
+
+  /* Visitors set well apart from the lists above, and their chart from
+     their numbers. */
+  .people {
+    margin-top: 5rem;
+  }
+
+  .people > .chart {
+    margin-top: 4rem;
+  }
+
   .people-head {
     flex-direction: column;
-    gap: 1rem;
+    gap: 2rem;
   }
 
   .countries {

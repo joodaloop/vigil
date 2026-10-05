@@ -8,6 +8,7 @@
 // share, with a little variation so the lists reorder; they don't add up
 // between filters the way real ones do.
 
+import { type Sparse, toSparse } from "../shared/series";
 import type { HostStats, HostSummaries, Overview, PageRow, Referrer, Site } from "../shared/types";
 
 const SITES: Site[] = [
@@ -52,6 +53,21 @@ const SOURCES: [string, number][] = [
   ["claude.ai", 0.4], ["facebook.com", 0.4], ["brave.com", 0.3], ["someones-blog.net", 0.3],
   ["newsletter.example.io", 0.2], ["forum.example.dev", 0.2],
 ];
+// The names other sites' home pages give, as the Worker would look up.
+const NAMES: Record<string, string> = {
+  "someones-blog.net": "Someone’s Blog",
+  "newsletter.example.io": "The Example Newsletter",
+  "forum.example.dev": "Example Dev Forum",
+};
+// A page's title, as the Worker would read it: the site's name for its home
+// page, otherwise made from its last part ("/posts/sqlite-is-enough/" is
+// "Sqlite is enough").
+function titleOf(host: string, path: string): string {
+  const slug = path.split("/").filter(Boolean).pop();
+  if (!slug) return SITES.find((s) => s.host === host)!.name;
+  const words = slug.replace(/-/g, " ");
+  return words[0].toUpperCase() + words.slice(1);
+}
 // The links behind spikes.
 const SPIKERS = ["news.ycombinator.com", "reddit.com", "lobste.rs", "x.com", "bsky.app"];
 const COUNTRIES: [string, number][] = [
@@ -132,11 +148,23 @@ function make(host: string, n: number): { dayNums: number[]; stats: HostStats } 
   const dayNums = Array.from({ length: n }, (_, i) => today() - n + 1 + i);
   const its = spikes(host);
   const pageShares = tail(PAGES[host], host);
+  // A row's reads: about four in ten of its views each day.
+  const withReads = <T extends { daily: number[] }>(key: string, r: T) => {
+    const dailyReads = r.daily.map((v, i) => Math.round(v * 0.38 * wobble(0.12, host, key, "reads", dayNums[i])));
+    return { ...r, reads: sum(dailyReads), dailyReads };
+  };
   const pages: PageRow[] = PAGES[host].map((path) => {
     const r = row(host, path, pageShares.get(path)!, dayNums, (d) =>
       its.filter((s) => s.page === path).reduce((x, s) => x + spikeOn(s, d), 0),
     );
-    return { path, views: r.views, new: r.new, daily: r.daily, dailyNew: r.dailyNew };
+    return withReads(path, {
+      path,
+      title: titleOf(host, path),
+      views: r.views,
+      new: r.new,
+      daily: r.daily,
+      dailyNew: r.dailyNew,
+    });
   });
   // Direct visits, unlisted, take about a third; clicks within the site take
   // a little of the rest.
@@ -149,7 +177,15 @@ function make(host: string, n: number): { dayNums: number[]; stats: HostStats } 
     const r = row(host, source, (0.65 * w) / total, dayNums, (d) =>
       its.filter((s) => s.source === source).reduce((x, s) => x + spikeOn(s, d), 0),
     );
-    return { source, views: r.views, new: r.new, daily: r.daily, dailyNew: r.dailyNew };
+    const name = source.startsWith("/") ? titleOf(host, source) : NAMES[source];
+    return withReads(source, {
+      source,
+      ...(name ? { name } : {}),
+      views: r.views,
+      new: r.new,
+      daily: r.daily,
+      dailyNew: r.dailyNew,
+    });
   });
   const views = dayNums.map((_, i) => pages.reduce((x, p) => x + p.daily[i], 0));
   const fresh = dayNums.map((_, i) => pages.reduce((x, p) => x + p.dailyNew[i], 0));
@@ -157,7 +193,7 @@ function make(host: string, n: number): { dayNums: number[]; stats: HostStats } 
     views,
     new: fresh,
     visitors: views.map((v, i) => Math.round((v / 1.7) * wobble(0.08, host, "visitors", dayNums[i]))),
-    reads: views.map((v, i) => Math.round(v * 0.38 * wobble(0.12, host, "reads", dayNums[i]))),
+    reads: dayNums.map((_, i) => pages.reduce((x, p) => x + p.dailyReads[i], 0)),
   };
   // Some visitors come back on other days, so the period's are fewer than
   // the days' added up.
@@ -210,9 +246,15 @@ function filtered(host: string, n: number, f: Filters): HostStats {
   const all = pageShare * sourceShare * countryShare;
   const key = `${f.page} ${f.source} ${f.country}`;
   const off = (name: string, picked: boolean) => (picked ? 1 : wobble(0.6, host, key, name));
-  const scaled = <T extends { daily: number[]; dailyNew: number[] }>(r: T, share: number, name: string, picked: boolean) => {
+  const scaled = <T extends { daily: number[]; dailyNew: number[]; dailyReads: number[] }>(
+    r: T,
+    share: number,
+    name: string,
+    picked: boolean,
+  ) => {
     const w = share * off(name, picked);
-    return { ...r, daily: r.daily.map((v) => Math.round(v * w)), dailyNew: r.dailyNew.map((v) => Math.round(v * w)) };
+    const by = (a: number[]) => a.map((v) => Math.round(v * w));
+    return { ...r, daily: by(r.daily), dailyNew: by(r.dailyNew), dailyReads: by(r.dailyReads) };
   };
 
   // The chart follows the picked page's (or source's) days, scaled by the
@@ -225,12 +267,12 @@ function filtered(host: string, n: number, f: Filters): HostStats {
 
   const pages: PageRow[] = (page ? [page] : f.page ? [] : stats.pages)
     .map((p) => scaled(p, sourceShare * countryShare, p.path, !!page))
-    .map((p) => ({ ...p, views: sum(p.daily), new: sum(p.dailyNew) }))
+    .map((p) => ({ ...p, views: sum(p.daily), new: sum(p.dailyNew), reads: sum(p.dailyReads) }))
     .filter((p) => p.views > 0)
     .sort((a, b) => b.views - a.views);
   const referrers: Referrer[] = (source ? [source] : f.source ? [] : stats.referrers)
     .map((r) => scaled(r, pageShare * countryShare, r.source, !!source))
-    .map((r) => ({ ...r, views: sum(r.daily), new: sum(r.dailyNew) }))
+    .map((r) => ({ ...r, views: sum(r.daily), new: sum(r.dailyNew), reads: sum(r.dailyReads) }))
     .filter((r) => r.views > 0)
     .sort((a, b) => b.new - a.new || b.views - a.views);
   const visitors = Math.round(t.visitors * all);
@@ -266,7 +308,11 @@ export function get(path: string, params: URLSearchParams): Promise<unknown> {
     for (const { host } of SITES) {
       const { dayNums, stats } = unfiltered(host, n);
       result.days = days(dayNums);
-      result.hosts[host] = { totals: { views: stats.totals.views, new: stats.totals.new }, daily: { views: stats.daily.views } };
+      const { totals: t, daily: d } = stats;
+      result.hosts[host] = {
+        totals: { views: t.views, reads: t.reads, new: t.new },
+        daily: { views: d.views, reads: d.reads, new: d.new },
+      };
     }
     return later(result);
   }
@@ -278,7 +324,17 @@ export function get(path: string, params: URLSearchParams): Promise<unknown> {
       source: params.get("source"),
       country: params.get("country"),
     });
-    const result: Overview = { days: days(unfiltered(host, n).dayNums), stats };
+    // Its rows' series sparse, as the Worker sends them.
+    const sparse = <T extends { daily: number[]; dailyNew: number[]; dailyReads: number[] }>(r: T) => ({
+      ...r,
+      daily: toSparse(r.daily),
+      dailyNew: toSparse(r.dailyNew),
+      dailyReads: toSparse(r.dailyReads),
+    });
+    const result: Overview<Sparse> = {
+      days: days(unfiltered(host, n).dayNums),
+      stats: { ...stats, pages: stats.pages.map(sparse), referrers: stats.referrers.map(sparse) },
+    };
     return later(result);
   }
   return Promise.reject(new Error("404 Not Found"));

@@ -1,3 +1,4 @@
+import type { Sparse } from "../shared/series";
 import type { HostStats, HostSummaries, Overview, PageRow, Referrer } from "../shared/types";
 import { countrySums, type Filters, filteredVisitors } from "./hitQueries";
 import { configuredSites } from "./sites";
@@ -19,10 +20,12 @@ import { configuredSites } from "./sites";
 // site, the path of the page it came from (paths start with "/").
 
 type DailyRow = { day: number; views: number; visitors: number; new: number; reads: number };
-type PageDayRow = { page: string; day: number; views: number; new: number };
-type SourceDayRow = { source: string; day: number; views: number; new: number };
+type PageDayRow = { page: string; day: number; views: number; new: number; reads: number };
+type SourceDayRow = { source: string; day: number; views: number; new: number; reads: number };
 type PeopleRow = { device: string | null; country: string | null; os: string | null; visitors: number; bounced: number };
-type HostDailyRow = { host: string; day: number; views: number; new: number };
+type SourceInfoRow = { domain: string; name: string | null; icon: number | null };
+type PageTitleRow = { path: string; title: string };
+type HostDailyRow = { host: string; day: number; views: number; new: number; reads: number };
 
 // The first day (UTC day number) of the last `numDays`, and each day's start
 // in unix seconds.
@@ -31,7 +34,7 @@ function period(numDays: number) {
     return { firstDay, days: Array.from({ length: numDays }, (_, i) => (firstDay + i) * 86400) };
 }
 
-function emptyHost(n: number): HostStats {
+function emptyHost(n: number): HostStats<Sparse> {
     return {
         totals: {
             views: 0,
@@ -49,14 +52,13 @@ function emptyHost(n: number): HostStats {
     };
 }
 
-async function overview(env: Env, host: string, numDays: number, filters: Filters): Promise<Overview> {
+async function overview(env: Env, host: string, numDays: number, filters: Filters): Promise<Overview<Sparse>> {
     const { page, source, country } = filters;
     const { firstDay, days } = period(numDays);
-    const result: Overview = { days, stats: emptyHost(numDays) };
+    const result: Overview<Sparse> = { days, stats: emptyHost(numDays) };
     // The sums are grouped in SQL, so the Worker gets back a few hundred
     // rows rather than every (day, page, source) one. Every number, lists
-    // included, takes every filter: the dashboard lists the options from the
-    // unfiltered overview, which it already has.
+    // included, takes every filter.
     const q = (sql: string) => {
         const where = ["host = ?", "day >= ?"];
         const params: unknown[] = [host, firstDay];
@@ -69,7 +71,7 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
     const h = (part: { sql: string; params: unknown[] }) => env.DB.prepare(part.sql).bind(...part.params);
     const filtered = page || source || country;
     const byFilter = filtered ? filteredVisitors(host, firstDay, filters) : null;
-    const [daily, pages, sources, everyone, filteredDaily] = (await env.DB.batch([
+    const [daily, pages, sources, everyone, sourceInfo, titles, filteredDaily] = (await env.DB.batch([
         inCountry
             ? h(inCountry.daily)
             : q(
@@ -78,12 +80,18 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
               ),
         inCountry
             ? h(inCountry.pages)
-            : q(`SELECT page, day, SUM(views) AS views, SUM(new) AS new FROM views WHERE $WHERE GROUP BY page, day`),
+            : q(
+                  `SELECT page, day, SUM(views) AS views, SUM(new) AS new, SUM(reads) AS reads
+                   FROM views WHERE $WHERE GROUP BY page, day`,
+              ),
         // Where views came from: another site, or on a click within the site,
         // the previous page.
         inCountry
             ? h(inCountry.sources)
-            : q(`SELECT source, day, SUM(views) AS views, SUM(new) AS new FROM views WHERE $WHERE AND source != '' GROUP BY source, day`),
+            : q(
+                  `SELECT source, day, SUM(views) AS views, SUM(new) AS new, SUM(reads) AS reads
+                   FROM views WHERE $WHERE AND source != '' GROUP BY source, day`,
+              ),
         // Visitors in the period, by device, country and OS. Unfiltered:
         // everyone whose latest visit is in it, since the period ends today,
         // read from the covering index; filtered, from the filter's hits.
@@ -93,6 +101,19 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
                   `SELECT device, country, os, COUNT(*) AS visitors, SUM(first_ts >= ?2 AND first_ts = last_ts) AS bounced
                    FROM visitors WHERE host = ?1 AND last_ts >= ?2 GROUP BY device, country, os`,
               ).bind(host, firstDay * 86400),
+        // Names and saved icons of the site and the period's other sites
+        // (schema.sql).
+        env.DB.prepare(
+            `SELECT domain, name, icon_ts AS icon FROM sources
+             WHERE domain = ?1 OR domain IN (SELECT source FROM views WHERE host = ?1 AND day >= ?2)`,
+        ).bind(host, firstDay),
+        // Titles of the period's pages, and of those clicked through from.
+        env.DB.prepare(
+            `SELECT path, title FROM pages
+             WHERE host = ?1 AND title IS NOT NULL
+               AND path IN (SELECT page FROM views WHERE host = ?1 AND day >= ?2
+                            UNION SELECT source FROM views WHERE host = ?1 AND day >= ?2)`,
+        ).bind(host, firstDay),
         // Filtered, visitors per day; unfiltered, they're summed from `views`.
         byFilter ? env.DB.prepare(byFilter.daily).bind(...byFilter.params) : null,
     ].filter((s) => s !== null))) as [
@@ -100,6 +121,8 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
         D1Result<PageDayRow>,
         D1Result<SourceDayRow>,
         D1Result<PeopleRow>,
+        D1Result<SourceInfoRow>,
+        D1Result<PageTitleRow>,
         ...D1Result[],
     ];
     const visitorsByDay = filteredDaily as D1Result<{ day: number; visitors: number }> | undefined;
@@ -120,28 +143,46 @@ async function overview(env: Env, host: string, numDays: number, filters: Filter
         t.reads += r.reads;
     }
 
-    const byPage = new Map<string, PageRow>();
+    // Each row's numbers, added up from its days; its series hold only the
+    // days with a value, as the queries return only days with views.
+    const add = (row: PageRow<Sparse> | Referrer<Sparse>, r: { day: number; views: number; new: number; reads: number }) => {
+        const i = r.day - firstDay;
+        row.views += r.views;
+        row.new += r.new;
+        row.reads += r.reads;
+        row.daily.push([i, r.views]);
+        if (r.new) row.dailyNew.push([i, r.new]);
+        if (r.reads) row.dailyReads.push([i, r.reads]);
+    };
+    const noNumbers = () => ({ views: 0, new: 0, reads: 0, daily: [], dailyNew: [], dailyReads: [] });
+
+    const byPage = new Map<string, PageRow<Sparse>>();
     for (const r of pages.results) {
         let p = byPage.get(r.page);
-        if (!p) {
-            const zeros = () => Array(numDays).fill(0);
-            byPage.set(r.page, (p = { path: r.page, views: 0, new: 0, daily: zeros(), dailyNew: zeros() }));
-        }
-        p.views += r.views;
-        p.new += r.new;
-        p.daily[r.day - firstDay] = r.views;
-        p.dailyNew[r.day - firstDay] = r.new;
+        if (!p) byPage.set(r.page, (p = { path: r.page, ...noNumbers() }));
+        add(p, r);
     }
     stats.pages = [...byPage.values()].sort((a, b) => b.views - a.views);
 
-    const bySource = new Map<string, Referrer>();
+    const bySource = new Map<string, Referrer<Sparse>>();
     for (const r of sources.results) {
         let s = bySource.get(r.source);
-        if (!s) bySource.set(r.source, (s = { source: r.source, views: 0, new: 0, daily: Array(numDays).fill(0), dailyNew: Array(numDays).fill(0) }));
-        s.views += r.views;
-        s.new += r.new;
-        s.daily[r.day - firstDay] = r.views;
-        s.dailyNew[r.day - firstDay] = r.new;
+        if (!s) bySource.set(r.source, (s = { source: r.source, ...noNumbers() }));
+        add(s, r);
+    }
+    for (const r of sourceInfo.results) {
+        if (r.domain === host && r.icon !== null) result.icon = r.icon;
+        const s = bySource.get(r.domain);
+        if (s && r.name) s.name = r.name;
+        if (s && r.icon !== null) s.icon = r.icon;
+    }
+    // A page's title, on its row and as the name of the referrer it is when
+    // clicked through from.
+    for (const r of titles.results) {
+        const p = byPage.get(r.path);
+        if (p) p.title = r.title;
+        const s = bySource.get(r.path);
+        if (s) s.name = r.title;
     }
     stats.referrers = [...bySource.values()].sort((a, b) => b.new - a.new || b.views - a.views);
 
@@ -195,16 +236,22 @@ async function hostSummaries(env: Env, hosts: string[], numDays: number): Promis
     // ?1 = first day, then the hosts.
     const IN = hosts.map((_, i) => `?${i + 2}`).join(",");
     const { results } = await env.DB.prepare(
-        `SELECT host, day, SUM(views) AS views, SUM(new) AS new
+        `SELECT host, day, SUM(views) AS views, SUM(new) AS new, SUM(reads) AS reads
          FROM views WHERE host IN (${IN}) AND day >= ?1 GROUP BY host, day`,
     )
         .bind(firstDay, ...hosts)
         .all<HostDailyRow>();
 
     for (const r of results) {
-        const h = (result.hosts[r.host] ??= { totals: { views: 0, new: 0 }, daily: { views: Array(numDays).fill(0) } });
+        const h = (result.hosts[r.host] ??= {
+            totals: { views: 0, reads: 0, new: 0 },
+            daily: { views: Array(numDays).fill(0), reads: Array(numDays).fill(0), new: Array(numDays).fill(0) },
+        });
         h.daily.views[r.day - firstDay] = r.views;
+        h.daily.reads[r.day - firstDay] = r.reads;
+        h.daily.new[r.day - firstDay] = r.new;
         h.totals.views += r.views;
+        h.totals.reads += r.reads;
         h.totals.new += r.new;
     }
     return result;

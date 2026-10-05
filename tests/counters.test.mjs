@@ -166,13 +166,13 @@ test("sums over views and counts of visitors match scans of hits", () => {
                 );
                 assert.deepEqual(
                     run(q.pages),
-                    all(`SELECT page, day, COUNT(*) AS views, SUM(first) AS new FROM ${RAW}
+                    all(`SELECT page, day, COUNT(*) AS views, SUM(first) AS new, SUM(read) AS reads FROM ${RAW}
                          WHERE host = ?1 AND day >= ?2 AND country = ?3 GROUP BY page, day`, { ...where, 3: c }),
                     `${label}, pages in ${c}`,
                 );
                 assert.deepEqual(
                     run(q.sources),
-                    all(`SELECT source, day, COUNT(*) AS views, SUM(first) AS new FROM ${RAW}
+                    all(`SELECT source, day, COUNT(*) AS views, SUM(first) AS new, SUM(read) AS reads FROM ${RAW}
                          WHERE host = ?1 AND day >= ?2 AND country = ?3 AND source != '' GROUP BY source, day`, { ...where, 3: c }),
                     `${label}, sources in ${c}`,
                 );

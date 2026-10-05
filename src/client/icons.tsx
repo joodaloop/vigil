@@ -1,7 +1,9 @@
+import { createSignal, Show } from "solid-js";
 import { theme } from "./theme";
 
 // Outline icons, as the markup inside each 24x24 <svg>: brands for well-known
-// sources, `link` for other sites and `file` for pages of the site itself.
+// sources, `link` for other sites and `file` (a filled square) for pages of
+// the site itself.
 // From Tabler (tabler.io/icons, MIT), except `kagi` (the magnifier from Kagi's
 // logo, unfilled and scaled from its 20x20 box), `substack` (its logo drawn
 // as outlines), `lobsters` (the L from its logo, in Tabler's square),
@@ -20,7 +22,7 @@ export const ICONS: Record<string, string> = {
     duckduckgo: "<path transform=\"translate(1.8 1.8) scale(0.85)\" fill=\"currentColor\" stroke=\"none\" d=\"M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm0 .984C18.083.984 23.016 5.916 23.016 12S18.084 23.016 12 23.016.984 18.084.984 12C.984 5.917 5.916.984 12 .984zm0 .938C6.434 1.922 1.922 6.434 1.922 12c0 4.437 2.867 8.205 6.85 9.55-.237-.82-.776-2.753-1.6-6.052-1.184-4.741-2.064-8.606 2.379-9.813.047-.011.064-.064.03-.093-.514-.467-1.382-.548-2.233-.38a.06.06 0 0 1-.07-.058c0-.011 0-.023.011-.035.205-.286.572-.507.822-.64a1.843 1.843 0 0 0-.607-.335c-.059-.022-.059-.12-.006-.144.006-.006.012-.012.024-.012 1.749-.233 3.586.292 4.49 1.448.011.011.023.017.035.023 2.968.635 3.509 4.837 3.328 5.998a9.607 9.607 0 0 0 2.346-.576c.746-.286 1.008-.222 1.101-.053.1.193-.018.513-.28.81-.496.567-1.393 1.01-2.974 1.137-.546.044-1.029.024-1.445.006-.789-.035-1.339-.059-1.633.39-.192.298-.041.998 1.487 1.22 1.090.157 2.078.047 2.798-.034.643-.07 1.073-.118 1.172.069.21.402-.996 1.207-3.066 1.224-.158 0-.315-.006-.467-.011-1.283-.065-2.227-.414-2.816-.735a.094.094 0 0 1-.035-.017c-.105-.059-.31.045-.188.267.07.134.444.478 1.004.776-.058.466.087 1.184.338 2l.088-.016c.041-.009.087-.019.134-.025.507-.082.775.012.926.175.717-.536 1.913-1.294 2.03-1.154.583.694.66 2.332.53 2.99-.004.012-.017.024-.04.035-.274.117-1.783-.296-1.783-.511-.059-1.075-.26-1.173-.493-1.225h-.156c.006.006.012.018.018.03l.052.12c.093.257.24 1.063.13 1.26-.112.199-.835.297-1.284.303-.443.006-.543-.158-.637-.408-.07-.204-.103-.675-.103-.95a.857.857 0 0 1 .012-.216c-.134.058-.333.193-.397.281-.017.262-.017.682.123 1.149.07.221-1.518 1.164-1.74.99-.227-.181-.634-1.952-.459-2.67-.187.017-.338.075-.42.191-.367.508.093 2.933.582 3.248.257.169 1.54-.553 2.176-1.095.105.145.305.158.553.158.326-.012.782-.06 1.103-.158.192.45.423.972.613 1.388 4.470-1.032 7.803-5.037 7.803-9.820 0-5.566-4.512-10.078-10.078-10.078zm1.791 5.646c-.42 0-.678.146-.795.332-.023.047.047.094.094.07.14-.075.357-.161.701-.156.328.006.516.09.67.159l.023.01c.041.017.088-.03.059-.065-.134-.18-.332-.35-.752-.35zm-5.078.198a1.24 1.24 0 0 0-.522.082c-.454.169-.67.526-.67.76 0 .051.112.057.141.011.081-.123.21-.31.617-.478.408-.17.73-.146.951-.094.047.012.083-.041.041-.07a.989.989 0 0 0-.558-.211zm5.434 1.423a.651.651 0 0 0-.655.647.652.652 0 0 0 1.307 0 .646.646 0 0 0-.652-.647zm.283.262h.008a.17.17 0 0 1 .17.17c0 .093-.077.17-.17.17a.17.17 0 0 1-.17-.17c0-.09.072-.165.162-.17zm-5.358.076a.752.752 0 0 0-.758.758c0 .42.338.758.758.758s.758-.337.758-.758a.756.756 0 0 0-.758-.758zm.328.303h.01c.112 0 .2.089.2.2 0 .11-.088.197-.2.197a.195.195 0 0 1-.197-.198c0-.107.082-.194.187-.199z\" />",
     ecosia: "<path transform=\"translate(1.8 1.8) scale(0.85)\" fill=\"currentColor\" stroke=\"none\" d=\"M15.198 6.818H8.786v10.48h6.412v-3.342h-3.98v-1.262H13.8V11.42h-2.584v-1.261h3.981zM11.972.06A12.003 12.003 0 0 0 0 12.064a12.003 12.003 0 0 0 10.083 11.848c.068-1.277.196-2.723.434-3.652v-.014c0-.005 0-.007-.01-.012 0-.005-.01-.007-.012-.009 0-.002-.01-.002-.014-.002h-.356c-2.307 0-5.943-.333-6.916-3.45-1.458-4.642 2.025-6.314 3.484-4.97 0 .004.012.008.019.008.01 0 .014 0 .02-.005.01-.005.013-.009.015-.016v-.021c-.322-.945-2.148-6.867 2.64-8.496 4.08-1.369 8.07 1.491 7.461 5.265v.017c0 .007.01.012.012.014 0 .002.012.005.016.005 0 0 .012-.002.016-.005.298-.246 1.603-1.186 2.919-.148 1.247.982.844 3.73-1.627 5.003-.01.002-.014.007-.02.014v.023c0 .01.01.014.015.02.01.004.016.004.023.001 1.596-.239 4.316 1.193 2.11 4.375-1.447 2.1-4.71 2.365-6.168 2.365h-1.071s-.01 0-.012.002c0 .002-.01.005-.012.007 0 .002 0 .005-.01.009v.012c-.021.751.331 2.304.693 3.688A12.003 12.003 0 0 0 24 12.063 12.003 12.003 0 0 0 11.997.06a12.003 12.003 0 0 0-.03 0z\" />",
     facebook: "<path d=\"M7 10v4h3v7h4v-7h3l1 -4h-4v-2a1 1 0 0 1 1 -1h3v-4h-3a5 5 0 0 0 -5 5v2h-3\" />",
-    file: "<path d=\"M14 3v4a1 1 0 0 0 1 1h4\" /> <path d=\"M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2\" />",
+    file: "<rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" fill=\"currentColor\" stroke=\"none\" />",
     github: "<path d=\"M9 19c-4.3 1.4 -4.3 -2.5 -6 -3m12 5v-3.5c0 -1 .1 -1.4 -.5 -2c2.8 -.3 5.5 -1.4 5.5 -6a4.6 4.6 0 0 0 -1.3 -3.2a4.2 4.2 0 0 0 -.1 -3.2s-1.1 -.3 -3.5 1.3a12.3 12.3 0 0 0 -6.2 0c-2.4 -1.6 -3.5 -1.3 -3.5 -1.3a4.2 4.2 0 0 0 -.1 3.2a4.6 4.6 0 0 0 -1.3 3.2c0 4.6 2.7 5.7 5.5 6c-.6 .6 -.6 1.2 -.5 2v3.5\" />",
     google: "<path d=\"M20.945 11a9 9 0 1 1 -3.284 -5.997l-2.655 2.392a5.5 5.5 0 1 0 2.119 6.605h-4.125v-3h7.945\" />",
     kagi: "<g transform=\"translate(-0.5 -0.5) scale(1.23)\" stroke-width=\"1.5\"><path d=\"M11.572 11.911a1.15 1.15 0 0 1 1.28-.26c.143.058.273.144.382.254l3.37 3.184.416.42c.11.108.198.236.26.377.06.142.09.294.092.448a1.197 1.197 0 0 1-.714 1.091 1.144 1.144 0 0 1-.902.007 1.164 1.164 0 0 1-.383-.254l-.747-.738-3.046-2.852a1.163 1.163 0 0 1 0-1.662l-.008-.015Z\"/><path d=\"M8.613 14.374a5.761 5.761 0 1 0 0-11.522 5.761 5.761 0 0 0 0 11.522Z\"/><path d=\"M12.363 8.611a3.751 3.751 0 0 1-7.501 0 3.75 3.75 0 1 1 7.501 0Z\"/><path stroke-width=\"1.1\" d=\"M12.354 8.35a3.754 3.754 0 0 0-4.463 3.939 3.75 3.75 0 0 0 4.463-3.939ZM9.366 4.974a3.754 3.754 0 0 0-4.463 3.943 3.753 3.753 0 0 0 4.479-3.68c0-.09-.01-.176-.016-.263Z\"/></g>",
@@ -46,7 +48,7 @@ export const ICONS: Record<string, string> = {
 };
 
 // Each source's icon in its brand colour; black logos use the text colour.
-// Other sites' links are plain and the site's own pages use green.
+// Other sites' links are plain and the site's own pages use the views' blue.
 const ICON_STYLE: Record<string, { size?: number; color: () => string }> = {
   google: { color: () => "#EA4335" },
   bing: { color: () => "#0078D4" },
@@ -74,28 +76,53 @@ const ICON_STYLE: Record<string, { size?: number; color: () => string }> = {
   perplexity: { color: () => "#1FB8CD" },
   claude: { color: () => "#D97757" },
   link: { color: () => theme.text },
-  file: { color: () => theme.stats.visitors },
+  file: { color: () => theme.stats.views },
 };
 
 // A source's icon (ICONS), centred in a slot as wide as the largest one,
-// so names line up whatever the icon's size.
-export function SourceIcon(props: { name: string }) {
+// so names line up whatever the icon's size. For a site (`link`, another
+// one, or `file`, a page of this one) with its domain (`site`), that site's
+// favicon, through the Worker (src/worker/sources.ts): the one saved for it
+// (`saved`, its version), or DuckDuckGo's; or the plain icon if there's
+// none. A demo has no Worker, and made-up sites, so the plain icon always.
+export function SourceIcon(props: { name: string; site?: string; saved?: number }) {
   const style = () => ICON_STYLE[props.name];
+  const [failed, setFailed] = createSignal(false);
+  const favicon = () =>
+    import.meta.env.MODE !== "demo" && (props.name === "link" || props.name === "file") && props.site && !failed()
+      ? props.site
+      : null;
   return (
     <span class="source-icon">
-      <svg
-        width={style()?.size ?? 16}
-        height={style()?.size ?? 16}
-        style={{ color: style()?.color() }}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-        innerHTML={ICONS[props.name]}
-      />
+      <Show
+        when={favicon()}
+        fallback={
+          <svg
+            width={style()?.size ?? 16}
+            height={style()?.size ?? 16}
+            style={{ color: style()?.color() }}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            innerHTML={ICONS[props.name]}
+          />
+        }
+      >
+        {(site) => (
+          <img
+            src={`/api/icon/${encodeURIComponent(site())}${props.saved !== undefined ? `?v=${props.saved}` : ""}`}
+            width="16"
+            height="16"
+            alt=""
+            referrerpolicy="no-referrer"
+            onError={() => setFailed(true)}
+          />
+        )}
+      </Show>
     </span>
   );
 }

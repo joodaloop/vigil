@@ -3,9 +3,10 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
 // `scale` groups lines that share a y axis (e.g. "count", "ratio"); `area`
-// draws it as a faint fill down to the baseline instead of a line (its
-// colour must be #rrggbb).
-export type Line = { values: (number | null)[]; color: string; scale: string; area?: boolean };
+// draws it as a solid fill down to the baseline instead of a line, or with
+// `light`, a light one (its colour must then be #rrggbb). Lines are drawn
+// in order, later ones over earlier ones.
+export type Line = { values: (number | null)[]; color: string; scale: string; area?: boolean; light?: boolean };
 
 // Top of a scale's 0..top range, given the largest value on it.
 const scaleTop = (max: number) => (max > 0 ? max * 1.05 : 1);
@@ -26,10 +27,11 @@ const chartPadding = (lineWidth: number) => Math.ceil(lineWidth);
 //
 // With `onHover`, hovering marks the day nearest the pointer (never a
 // placeholder) with dots on the lines, and reports its index; null once the
-// pointer leaves. Clicking pins the day, adding a line down through it: it
+// pointer leaves. `hoverDelay` waits that many ms after a mouse enters;
+// moving between days after that is immediate. Clicking pins the day, adding a line down through it: it
 // stays marked and reported, whatever the pointer does, until another day is
 // clicked (pinning that one instead), it is clicked again, or the days
-// change (another period, or the next day arriving).
+// change to ones without it (another period that doesn't reach it).
 //
 // `marked` marks a day chosen elsewhere (e.g. on another chart) with dots
 // on the lines alone.
@@ -41,6 +43,7 @@ export function Chart(props: {
     maxes?: Record<string, number>;
     headroom?: number;
     onHover?: (i: number | null) => void;
+    hoverDelay?: number;
     marked?: number | null;
 }) {
     const height = () => props.height + (props.headroom ?? 0);
@@ -49,16 +52,26 @@ export function Chart(props: {
     let plot: uPlot | undefined;
     // The hovered day, so moving within it doesn't report it again.
     let hovered: number | null = null;
-    // The day pinned by a click, if any, and the days it was pinned among.
+    let hoverTimer: number | undefined;
+    let mouseX: number | null = null;
+    let hoverReady = false;
+
+    function resetHoverDelay() {
+        window.clearTimeout(hoverTimer);
+        hoverTimer = undefined;
+        mouseX = null;
+        hoverReady = false;
+    }
+    // The day pinned by a click, if any: its index, and the day itself (unix
+    // seconds), to find it again among other days.
     const [pinned, setPinned] = createSignal<number | null>(null);
-    let pinnedAmong = "";
-    const daysKey = () => `${props.days[0]}:${props.days.length}`;
+    let pinnedDay: number | null = null;
     // Where the hovered day is drawn, in px from the chart's top left: its x,
     // a dot per line, and how far the plot's baseline is above the chart's
     // bottom edge (its padding), where the day's line stops.
     const [mark, setMark] = createSignal<{
         x: number;
-        dots: { y: number; color: string }[];
+        dots: { y: number; color: string; ring: boolean }[];
         base: number;
         line: boolean; // the line down through the day too
     } | null>(null);
@@ -77,26 +90,47 @@ export function Chart(props: {
         const top = over.top - b.top;
         setMark({
             x: over.left - b.left + u.valToPos(props.days[i], "x"),
-            dots: props.lines.map((l) => ({ y: top + u.valToPos(l.values[i] ?? 0, l.scale), color: l.color })),
+            // A fill's dot is a ring, and goes over a line's at the same
+            // place (the line along its top edge).
+            dots: props.lines
+                .map((l) => ({ y: top + u.valToPos(l.values[i] ?? 0, l.scale), color: l.color, ring: !!l.area }))
+                .sort((a, b) => Number(a.ring) - Number(b.ring)),
             base: b.bottom - over.bottom,
             line,
         });
     }
 
     // The day nearest the pointer, never a placeholder.
-    function dayAt(u: uPlot, e: MouseEvent) {
+    function dayAt(u: uPlot, e: Pick<MouseEvent, "clientX">) {
         const over = u.over.getBoundingClientRect();
         return Math.max(0, Math.min(props.days.length - 1, u.posToIdx(e.clientX - over.left) - ends()));
     }
 
-    function onMove(e: MouseEvent) {
+    function showHover(clientX: number) {
         if (!plot || !props.onHover || props.days.length === 0 || pinned() !== null) return;
-        const i = dayAt(plot, e);
+        const i = dayAt(plot, { clientX });
         markDay(plot, i, false);
         hover(i);
     }
 
+    function onMove(e: PointerEvent) {
+        if (!plot || !props.onHover || props.days.length === 0 || pinned() !== null) return;
+        if (e.pointerType === "mouse" && (props.hoverDelay ?? 0) > 0 && !hoverReady) {
+            mouseX = e.clientX;
+            if (hoverTimer === undefined) {
+                hoverTimer = window.setTimeout(() => {
+                    hoverTimer = undefined;
+                    hoverReady = true;
+                    if (mouseX !== null) showHover(mouseX);
+                }, props.hoverDelay);
+            }
+            return;
+        }
+        showHover(e.clientX);
+    }
+
     function onLeave() {
+        resetHoverDelay();
         if (pinned() !== null) return;
         setMark(null);
         hover(null);
@@ -108,6 +142,8 @@ export function Chart(props: {
     // hover.
     function onClick(e: MouseEvent) {
         if (!plot || !props.onHover || props.days.length === 0) return;
+        resetHoverDelay();
+        hoverReady = true;
         const i = dayAt(plot, e);
         if (pinned() === i) {
             // Back to hovering it (not through onMove, which would still
@@ -117,23 +153,25 @@ export function Chart(props: {
             hover(i);
         } else {
             setPinned(i);
-            pinnedAmong = daysKey();
+            pinnedDay = props.days[i];
             markDay(plot, i, true);
             hover(i);
         }
     }
 
     // After every redraw (new data, a resize), the pinned day is re-marked
-    // where it now is, or unpinned if the days have changed.
+    // where it now is among the days, or unpinned if they don't have it.
     function redrawn(u: uPlot) {
         if (props.marked != null) markDay(u, props.marked, false);
-        const i = pinned();
-        if (i === null) return;
-        if (daysKey() === pinnedAmong) {
+        if (pinned() === null) return;
+        const i = props.days.indexOf(pinnedDay!);
+        if (i >= 0) {
+            setPinned(i);
             markDay(u, i, true);
             hover(i);
         } else {
             setPinned(null);
+            pinnedDay = null;
             setMark(null);
             hover(null);
         }
@@ -165,7 +203,7 @@ export function Chart(props: {
                 scale: line.scale,
                 stroke: line.area ? "transparent" : line.color,
                 width: line.area ? 0 : props.lineWidth,
-                fill: line.area ? `${line.color}26` : undefined, // 15% opaque
+                fill: line.area ? (line.light ? `${line.color}26` : line.color) : undefined, // 26: 15% opaque
                 points: { show: false },
             });
         }
@@ -193,6 +231,7 @@ export function Chart(props: {
         const observer = new ResizeObserver(() => plot?.setSize({ width: el.clientWidth, height: height() }));
         observer.observe(el);
         return () => {
+            resetHoverDelay();
             observer.disconnect();
             plot?.destroy();
         };
@@ -221,6 +260,7 @@ export function Chart(props: {
             style={{ height: `${height()}px` }}
             // Touch: a finger down shows its day, dragging sideways moves
             // through days, lifting it (or a scroll taking over) clears it.
+            onPointerEnter={onMove}
             onPointerDown={onMove}
             onPointerMove={onMove}
             onPointerLeave={onLeave}
@@ -236,7 +276,10 @@ export function Chart(props: {
                         </Show>
                         <For each={m().dots}>
                             {(d) => (
-                                <div class="chart-dot" style={{ left: `${m().x}px`, top: `${d.y}px`, background: d.color }} />
+                                <div
+                                    class={["chart-dot", { ring: d.ring }]}
+                                    style={{ left: `${m().x}px`, top: `${d.y}px`, "--color": d.color }}
+                                />
                             )}
                         </For>
                     </>

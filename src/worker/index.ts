@@ -1,10 +1,11 @@
 import { handleApi } from "./api";
 import { handleHit, handleRead } from "./collect";
+import { handleIcon } from "./sources";
 import { testPage } from "./test-page";
 import tracker from "../tracker/v.js?raw";
 
 export default {
-    async fetch(request: Request, env: Env): Promise<Response> {
+    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
         const url = new URL(request.url);
         const { pathname } = url;
 
@@ -23,7 +24,7 @@ export default {
             return new Response("COOKIE_SECRET is not set", { status: 500 });
         }
         if (pathname === "/_v/hit" && request.method === "POST") {
-            return handleHit(request, env);
+            return handleHit(request, env, ctx);
         }
         if (pathname === "/_v/read" && request.method === "POST") {
             return handleRead(request, env);
@@ -32,6 +33,9 @@ export default {
             return testPage(url);
         }
 
+        if (pathname.startsWith("/api/icon/") && request.method === "GET") {
+            return handleIcon(url, env);
+        }
         if (pathname.startsWith("/api/")) {
             return handleApi(url, env);
         }

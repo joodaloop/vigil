@@ -105,3 +105,51 @@ CREATE TABLE IF NOT EXISTS views (
     reads    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (host, day, page, source)
 ) STRICT, WITHOUT ROWID;
+
+
+-- -----------------------------------------------------------------------------
+-- sources: what the dashboard shows for each site and each referring site
+-- that isn't one of the well-known ones (src/shared/referrers.ts), read from
+-- its home page. Shared by every site, as a domain is the same whichever it
+-- linked to.
+--
+-- A row is claimed by the first hit on or from its domain, and again by the
+-- first 30 days after; that hit's Worker then fetches the home page and fills
+-- it in (src/worker/sources.ts). Until then, and when there's none,
+-- the dashboard shows the domain, and DuckDuckGo's icon for it.
+--
+--   name       its og:site_name, or the first part of its <title>
+--   icon       its favicon, when there's one of at most 30 KB
+--   icon_ts    when that icon was saved (kept while it's unchanged): its
+--              version, so a new one replaces it in browsers' caches
+--   claimed_ts when it was last claimed
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sources (
+    domain     TEXT PRIMARY KEY,  -- "someblog.com", as in hits.source
+    name       TEXT,
+    icon       BLOB,
+    icon_type  TEXT,              -- the icon's Content-Type
+    icon_ts    INTEGER,
+    claimed_ts INTEGER NOT NULL
+) STRICT;
+
+
+-- -----------------------------------------------------------------------------
+-- pages: each page's title, read from the page itself, for the dashboard to
+-- show in place of its path (src/worker/sources.ts).
+--
+-- A row is claimed by the page's first hit, and again by its first 30 days
+-- after; that hit's Worker then fetches the page and fills it in, along with
+-- its site's favicon (in `sources`) if the site's row was claimed too. Until
+-- then, and for a page without one, the dashboard shows the path.
+--
+--   title      its og:title, or else its <title>
+--   claimed_ts when it was last claimed
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pages (
+    host       TEXT NOT NULL,
+    path       TEXT NOT NULL,  -- as in hits.page
+    title      TEXT,
+    claimed_ts INTEGER NOT NULL,
+    PRIMARY KEY (host, path)
+) STRICT, WITHOUT ROWID;

@@ -20,40 +20,51 @@ export type HostDaily = {
     reads: number[];
 };
 
-export type PageRow = {
-    path: string;
+// A page's or referrer's per-day series: one value per day (`S`), or as the
+// API sends them, only the days with one (Sparse).
+type RowNumbers<S> = {
     views: number;
-    new: number; // visitors whose first ever hit on the host was this page
-    daily: number[]; // views per day
-    dailyNew: number[]; // new visitors per day
+    new: number;
+    reads: number; // views that counted as read (engaged)
+    daily: S; // views per day
+    dailyNew: S; // new visitors per day
+    dailyReads: S; // reads per day
 };
 
-export type HostStats = {
+export type PageRow<S = number[]> = RowNumbers<S> & {
+    path: string; // `new`: visitors whose first ever hit on the host was this page
+    title?: string; // its title, read from it, if it's been looked up and has one
+};
+
+export type HostStats<S = number[]> = {
     totals: HostTotals;
     daily: HostDaily;
-    referrers: Referrer[]; // where views came from, by new visitors then views
-    pages: PageRow[]; // by views
+    referrers: Referrer<S>[]; // where views came from, by new visitors then views
+    pages: PageRow<S>[]; // by views
 };
 
-// The headline numbers for one host, for the sidebar: views (with a daily
-// series, for its sparkline) and new visitors.
+// The headline numbers for one host, for the sidebar: views, reads and new
+// visitors, for the period and each day (views' and reads' also for its
+// sparkline).
 export type HostSummary = {
-    totals: { views: number; new: number };
-    daily: { views: number[] };
+    totals: { views: number; reads: number; new: number };
+    daily: { views: number[]; reads: number[]; new: number[] };
 };
 
-export type Referrer = {
+export type Referrer<S = number[]> = RowNumbers<S> & {
     source: string; // a referring site's domain, or "/path" of a page on this one
-    views: number; // views that came from this source
-    new: number; // visitors whose first view came from it
-    daily: number[];
-    dailyNew: number[];
+    name?: string; // another site's name, from its home page, if it's not a well-known one; a page's title
+    icon?: number; // the version of its favicon, served at /api/icon/{source}?v=, if one's saved
+    // `views`: views that came from this source; `new`: visitors whose first
+    // view came from it
 };
 
-// GET /api/overview: everything for one host.
-export type Overview = {
+// GET /api/overview: everything for one host. Sent with its rows' series
+// sparse (Overview<Sparse>).
+export type Overview<S = number[]> = {
     days: number[]; // unix seconds at the start of each UTC day
-    stats: HostStats;
+    icon?: number; // the version of the site's own favicon, served at /api/icon/{host}?v=, if one's saved
+    stats: HostStats<S>;
 };
 
 // GET /api/hosts: every host on a site, by host name.

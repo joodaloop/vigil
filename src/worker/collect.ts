@@ -1,8 +1,9 @@
 import { UAParser } from "ua-parser-js";
 import { COUNT_READ, COUNT_VIEW, COUNT_VISITOR, READ_HIT } from "./counters";
 import { newVisitorId, readVisitor, visitorCookie } from "./session";
-import { canonicalSource } from "../shared/referrers";
+import { canonicalSource, isWellKnown } from "../shared/referrers";
 import { configuredSites } from "./sites";
+import { CLAIM_PAGE, CLAIM_SOURCE, lookUpPage, lookUpSource } from "./sources";
 import { TZ_COUNTRY } from "./tz-country";
 
 // Sent by the tracker on the first real scroll of a page.
@@ -46,7 +47,7 @@ function parseUrl(s: string | undefined): URL | null {
 
 const noStore = { "Cache-Control": "no-store" };
 
-export async function handleHit(request: Request, env: Env): Promise<Response> {
+export async function handleHit(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const body = await readJson<HitBody>(request);
     const host = clean(body?.h, 253)?.toLowerCase();
     const path = clean(body?.p, 1024);
@@ -69,6 +70,10 @@ export async function handleHit(request: Request, env: Env): Promise<Response> {
     const ua = new UAParser(request.headers.get("user-agent") ?? undefined);
     const visitorId = (await readVisitor(request, env.COOKIE_SECRET)) ?? newVisitorId();
     const country = TZ_COUNTRY[body.tz ?? ""] ?? null;
+    // The page's title and the site's icon are looked up (from the page) if
+    // this hit claims them (sources.ts), as are the name and icon of another
+    // site it came from that isn't a well-known one (from its home page).
+    const unknownSource = source !== "" && !source.startsWith("/") && !isWellKnown(source);
 
     // The id is the highest so far plus one, and ts is set by the database,
     // so id order is time order. The hit's country is its reader's, as kept
@@ -90,7 +95,13 @@ export async function handleHit(request: Request, env: Env): Promise<Response> {
             ua.getOS().name ?? null,
             ua.getDevice().type ?? "desktop",
         ),
+        env.DB.prepare(CLAIM_SOURCE).bind(host),
+        env.DB.prepare(CLAIM_PAGE).bind(host, path),
+        ...(unknownSource ? [env.DB.prepare(CLAIM_SOURCE).bind(source)] : []),
     ]);
+    const claimed = (i: number) => results[i].results.length > 0;
+    if (claimed(3) || claimed(4)) ctx.waitUntil(lookUpPage(env, host, path, claimed(3)));
+    if (unknownSource && claimed(5)) ctx.waitUntil(lookUpSource(env, source));
 
     const secure = new URL(request.url).protocol === "https:";
     return Response.json(

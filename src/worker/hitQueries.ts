@@ -48,11 +48,12 @@ export function countrySums(host: string, firstDay: number, filters: Filters & {
         },
         pages: {
             params,
-            sql: `SELECT page, ts / 86400 AS day, COUNT(*) AS views, SUM(is_new) AS new ${HITS} GROUP BY page, day`,
+            sql: `SELECT page, ts / 86400 AS day, COUNT(*) AS views, SUM(is_new) AS new, SUM(read) AS reads
+                  ${HITS} GROUP BY page, day`,
         },
         sources: {
             params,
-            sql: `SELECT source, ts / 86400 AS day, COUNT(*) AS views, SUM(is_new) AS new
+            sql: `SELECT source, ts / 86400 AS day, COUNT(*) AS views, SUM(is_new) AS new, SUM(read) AS reads
                   ${HITS} AND source != '' GROUP BY source, day`,
         },
     };

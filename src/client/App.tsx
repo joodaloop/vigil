@@ -9,15 +9,23 @@ import {
   onSettled,
   Show,
 } from "solid-js";
-import type { HostStats, HostSummaries, Overview, Site } from "../shared/types";
-import { get } from "./api";
+import { type Sparse, toDense } from "../shared/series";
+import type { HostStats, HostSummaries, Overview, PageRow, Referrer, Site } from "../shared/types";
+import { get, remember } from "./api";
 import { Chart } from "./Chart";
 import { DEFAULT_PERIOD, PERIODS } from "./config";
-import { FilterMenus, type Filters } from "./filters";
 import { fullDate, num, pct } from "./format";
-import { Pages, Referrers } from "./lists";
+import { Pages, Referrers, sparkline } from "./lists";
 import { People } from "./people";
 import { theme } from "./theme";
+
+// Each filter's pick, or null for none; set by picking a row in a list (or
+// a country's flag).
+type Filters = {
+  country: string | null; // an ISO code
+  page: string | null; // a path
+  source: string | null; // a referring site's domain, or a page's path
+};
 
 // What's shown, and fetched; kept in the address.
 type Query = {
@@ -46,38 +54,73 @@ function toParams(q: Query) {
   return params;
 }
 
+// An overview, its rows' series filled out to one value per day; reused if
+// it was loaded in the last few minutes (see remember).
+const getOverview = (params: URLSearchParams) =>
+  remember(`/api/overview?${params}`, () => loadOverview(params));
+
+async function loadOverview(params: URLSearchParams): Promise<Overview> {
+  const { days, icon, stats } = await get<Overview<Sparse>>("/api/overview", params);
+  const dense = <T extends { daily: Sparse; dailyNew: Sparse; dailyReads: Sparse }>(row: T) => ({
+    ...row,
+    daily: toDense(row.daily, days.length),
+    dailyNew: toDense(row.dailyNew, days.length),
+    dailyReads: toDense(row.dailyReads, days.length),
+  });
+  return {
+    days,
+    icon,
+    stats: { ...stats, pages: stats.pages.map(dense), referrers: stats.referrers.map(dense) },
+  };
+}
+
 export function App(props: { sites: Site[] }) {
   // Every site, in display order.
   const HOSTS = props.sites;
   const [query, setQuery] = createSignal(initialQuery(HOSTS));
-  // The open host's unfiltered overview, fetched once per host and period:
-  // it's what's shown without filters, and its lists are the filters'
-  // options.
+  // The open host's unfiltered overview: what's shown without filters (and
+  // kept, so clearing them is instant).
   const period = createMemo(() => `${query().host} ${query().days}`);
   const unfiltered = createMemo(() => {
     const [host, days] = period().split(" ");
-    return get<Overview>("/api/overview", { host, days });
+    return getOverview(new URLSearchParams({ host, days }));
   });
-  // The open host's stats (and its unfiltered ones), along with the query
-  // they answer. While a new query loads, this (and everything drawn from
-  // it) keeps showing the last one, so the panel's name, numbers and chart
-  // all switch together.
+  // The open host's stats, along with the query they answer. While a new
+  // query loads, this (and everything drawn from it) keeps showing the last
+  // one, so the panel's name, numbers and chart all switch together.
   const view = createMemo(async () => {
     const q = query();
     const all = unfiltered();
     const filtered = q.country !== null || q.page !== null || q.source !== null;
-    return { q, all, overview: filtered ? await get<Overview>("/api/overview", toParams(q)) : all };
+    return { q, all, overview: filtered ? await getOverview(toParams(q)) : all };
   });
   // Headline numbers for every host, for the sidebar. Only refetched when the
-  // period changes.
+  // period changes (and reused if it was loaded in the last few minutes).
   const days = createMemo(() => query().days);
-  const summaries = createMemo(() => get<HostSummaries>("/api/hosts", { days: String(days()) }));
-  // The sidebar's hosts, most views in the period first (ties keep site order).
+  const summaries = createMemo(() => {
+    const params = new URLSearchParams({ days: String(days()) });
+    return remember(`/api/hosts?${params}`, () => get<HostSummaries>("/api/hosts", params));
+  });
+  // Engaged mode: views shown as engaged ones (reads) instead, in the lists,
+  // the sidebar and the main chart; turned on and off by clicking the
+  // "engaged" total.
+  const [engaged, setEngaged] = createSignal(false);
+  // The sidebar's hosts, most views in the period first, or in engaged mode,
+  // most engaged views (ties keep site order). A hovered day doesn't
+  // reorder them.
   const byViews = createMemo(() => {
     const hosts = summaries().hosts;
-    const views = (h: Site) => hosts[h.host]?.totals.views ?? 0;
+    const k = engaged() ? "reads" : "views";
+    const views = (h: Site) => hosts[h.host]?.totals[k] ?? 0;
     return [...HOSTS].sort((a, b) => views(b) - views(a));
   });
+  // The day hovered or pinned on the main chart (unix seconds), which the
+  // sidebar shows too: its index in the sidebar's days, if it's one of them.
+  const [hoveredDay, setHoveredDay] = createSignal<number | null>(null);
+  const sidebarDay = () => {
+    const i = hoveredDay() === null ? -1 : summaries().days.indexOf(hoveredDay()!);
+    return i < 0 ? null : i;
+  };
   // A new query is on its way: the panel fades a little until it lands.
   const updating = () => isPending(() => view());
 
@@ -126,6 +169,11 @@ export function App(props: { sites: Site[] }) {
                 const open = () => latest(() => query().host) === h.host;
                 // Nothing in the period.
                 const empty = () => !s()?.totals.views;
+                // The day's numbers while one's hovered, else the period's.
+                const count = (k: "views" | "reads" | "new") => {
+                  const i = sidebarDay();
+                  return i === null ? (s()?.totals[k] ?? 0) : (s()?.daily[k][i] ?? 0);
+                };
                 return (
                   <button
                     class="host-item"
@@ -138,24 +186,20 @@ export function App(props: { sites: Site[] }) {
                     <Show when={!empty()} fallback={<span class="muted">No stats yet</span>}>
                       <span class="host-nums">
                         <span class="host-counts">
-                          <span style={{ color: theme.stats.views }}>
-                            {num(s()?.totals.views ?? 0)}
+                          <span class={{ engaged: engaged() }} style={{ color: theme.stats.views }}>
+                            {num(count(engaged() ? "reads" : "views"))}
                           </span>
-                          <span style={{ color: theme.stats.new }}>
-                            {num(s()?.totals.new ?? 0)}
-                          </span>
+                          <span style={{ color: theme.stats.new }}>{num(count("new"))}</span>
                         </span>
                         <Chart
                           days={summaries().days}
-                          lines={[
-                            {
-                              values: s()?.daily.views ?? [],
-                              color: theme.stats.views,
-                              scale: "count",
-                            },
-                          ]}
+                          lines={sparkline(
+                            (engaged() ? s()?.daily.reads : s()?.daily.views) ?? [],
+                            engaged(),
+                          )}
                           height={20}
                           lineWidth={1.5}
+                          marked={sidebarDay()}
                         />
                       </span>
                     </Show>
@@ -178,15 +222,24 @@ export function App(props: { sites: Site[] }) {
               name={HOSTS.find((h) => h.host === view().q.host)!.name}
               host={view().q.host}
               stats={view().overview.stats}
-              options={view().all.stats}
               days={view().overview.days}
-              // The picks show at once, ahead of their stats.
+              icon={view().overview.icon}
+              // How many rows each list has unfiltered, for its height.
+              rows={{
+                pages: view().all.stats.pages.length,
+                referrers: view().all.stats.referrers.length,
+              }}
+              // The filters of the stats shown, so a row shows as picked
+              // (and is drawn as such) until the stats without it land.
               filters={{
-                country: latest(() => query().country),
-                page: latest(() => query().page),
-                source: latest(() => query().source),
+                country: view().q.country,
+                page: view().q.page,
+                source: view().q.source,
               }}
               onFilter={update}
+              onDay={setHoveredDay}
+              engaged={engaged()}
+              onEngaged={() => setEngaged((on) => !on)}
             />
           </Errored>
         </section>
@@ -200,24 +253,36 @@ function Stats(props: {
   name: string;
   host: string;
   stats: HostStats;
-  options: HostStats; // unfiltered, for the filters' options
   days: number[];
+  icon?: number; // the site's saved favicon's version, if any
+  rows: { pages: number; referrers: number }; // each list's rows, unfiltered
   filters: Filters;
   onFilter: (change: Partial<Filters>) => void;
+  onDay: (day: number | null) => void; // the day hovered or pinned, in unix seconds
+  engaged: boolean; // engaged mode (see App)
+  onEngaged: () => void; // a click on the engaged total, turning it on or off
 }) {
   const t = () => props.stats.totals;
   // The day hovered on the chart, and the stats as of it, which the totals
-  // and lists show.
-  const [day, setDay] = createSignal<number | null>(null);
-  const shown = createMemo(() => onDay(props.stats, day()));
+  // and lists show. Kept as the day itself (unix seconds), and found among
+  // the days shown, so it's never one they don't have (as for a moment after
+  // the period changes, before the chart lets go of it).
+  const [hovered, setHovered] = createSignal<number | null>(null);
+  const day = createMemo(() => {
+    const i = hovered() === null ? -1 : props.days.indexOf(hovered()!);
+    return i < 0 ? null : i;
+  });
+  // In engaged mode, the lists ranked by engaged views instead.
+  const shown = createMemo(() => onDay(props.stats, day(), props.engaged));
   const st = () => shown().totals;
-  // Space switches the top half's numbers to percentages and back (but not
+  // Space switches the numbers to percentages and back (but not
   // while a control has focus, which space would press).
   const [asPct, setAsPct] = createSignal(false);
   onSettled(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== " " || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
-      if ((e.target as Element).closest("button, a, select, input, textarea, [contenteditable]")) return;
+      if ((e.target as Element).closest("button, a, select, input, textarea, [contenteditable]"))
+        return;
       e.preventDefault(); // or it would scroll the page
       setAsPct((p) => !p);
     };
@@ -232,15 +297,18 @@ function Stats(props: {
         <div class="stats-head">
           <div class="host-title">
             <h1>{props.name}</h1>
-            <span class="host-url">
-              {day() === null ? props.host : fullDate.format(props.days[day()!] * 1000)}
+            <span class="host-url" title={`https://${props.host}/`}>
+              {props.host}
             </span>
-            <FilterMenus
-              stats={props.stats}
-              options={props.options}
-              filters={props.filters}
-              onFilter={props.onFilter}
-            />
+            {/* The period's first and last days, or the day hovered. */}
+            <span class="host-dates">
+              {day() === null
+                ? fullDate.formatRange(
+                    props.days[0] * 1000,
+                    props.days[props.days.length - 1] * 1000,
+                  )
+                : fullDate.format(props.days[day()!] * 1000)}
+            </span>
           </div>
           {/* While a day is hovered: its numbers. */}
           <div class="totals">
@@ -249,11 +317,19 @@ function Stats(props: {
               <div class="big-label">Page views</div>
               {/* Read: visible for long enough (30s unless the tracker's
                   data-read-after says otherwise). */}
+              {/* Clicking it shows engaged views in place of views
+                  everywhere (engaged mode), until it's clicked again. */}
               <div class="sub">
-                <span class="count" title="Engaged: views that stayed on screen long enough">
-                  <span class="main-form">{num(st().reads)} engaged</span>
-                  <span class="alt-form">{pct(st().reads, st().views)}% engaged</span>
-                </span>
+                <button
+                  class="engaged-toggle"
+                  aria-pressed={props.engaged ? "true" : "false"}
+                  title="Engaged: views that stayed on screen long enough"
+                  onClick={props.onEngaged}
+                >
+                  {/* Only the form shown (unlike the other numbers, which
+                      keep both), so the button is as wide as its text. */}
+                  {asPct() ? `${pct(st().reads, st().views)}% engaged` : `${num(st().reads)} engaged`}
+                </button>
               </div>
             </div>
             <div class="total" style={{ color: theme.stats.new }}>
@@ -278,49 +354,99 @@ function Stats(props: {
         <Chart
           days={props.days}
           lines={[
-            { values: props.stats.daily.views, color: theme.stats.views, scale: "count" },
-            // Engaged views, as a fill under the views.
-            { values: props.stats.daily.reads, color: theme.stats.views, scale: "count", area: true },
-            { values: props.stats.daily.new, color: theme.stats.new, scale: "count" },
+            // Engaged views, filled, under the lines: light alongside the
+            // others, solid on their own.
+            {
+              values: props.stats.daily.reads,
+              color: theme.stats.views,
+              scale: "count",
+              area: true,
+              light: !props.engaged,
+            },
+            // Views and new visitors, or in engaged mode, engaged views alone.
+            ...(props.engaged
+              ? [{ values: props.stats.daily.reads, color: theme.stats.views, scale: "count" }]
+              : [
+                  { values: props.stats.daily.views, color: theme.stats.views, scale: "count" },
+                  { values: props.stats.daily.new, color: theme.stats.new, scale: "count" },
+                ]),
           ]}
           height={160}
           headroom={8}
           lineWidth={2}
-          onHover={setDay}
+          hoverDelay={250}
+          onHover={(i) => {
+            const t = i === null ? null : props.days[i];
+            setHovered(t);
+            props.onDay(t);
+          }}
         />
       </div>
 
       <div class="lists">
-        <Pages items={shown().pages} host={props.host} days={props.days} />
-        <Referrers items={shown().referrers} host={props.host} days={props.days} />
+        <Pages
+          items={shown().pages}
+          rows={props.rows.pages}
+          days={props.days}
+          engaged={props.engaged}
+          picked={props.filters.page}
+          onPick={(page) => props.onFilter({ page })}
+        />
+        <Referrers
+          items={shown().referrers}
+          rows={props.rows.referrers}
+          host={props.host}
+          icon={props.icon}
+          days={props.days}
+          engaged={props.engaged}
+          picked={props.filters.source}
+          onPick={(source) => props.onFilter({ source })}
+        />
       </div>
 
-      <People stats={shown()} days={props.days} day={day()} />
+      <People
+        stats={shown()}
+        days={props.days}
+        day={day()}
+        picked={props.filters.country}
+        onPick={(country) => props.onFilter({ country })}
+      />
     </div>
   );
 }
 
 // The stats as of a day hovered on the main chart (`day`), or the period's:
-// the totals and every row's numbers that day, the rows ranked by them as
-// they are for the period (ties keep the period's order). What's only known
-// for the whole period stays as it is.
-function onDay(stats: HostStats, day: number | null): HostStats {
-  if (day === null) return stats;
+// the totals and every row's numbers that day. What's only known for the
+// whole period stays as it is. Each list is ranked (once) as for the period
+// (pages by views, referrers by new visitors then views), or in engaged mode
+// (`engaged`), both by engaged views; ties keep the period's order. For the
+// period, unless engaged, they're already in that order.
+function onDay(stats: HostStats, day: number | null, engaged: boolean): HostStats {
+  type Row = PageRow | Referrer;
+  const atDay = <R extends Row>(r: R): R =>
+    day === null
+      ? r
+      : { ...r, views: r.daily[day], new: r.dailyNew[day], reads: r.dailyReads[day] };
+  const rank = <R extends Row>(rows: R[], by: (a: Row, b: Row) => number) =>
+    day === null && !engaged ? rows : rows.map(atDay).sort(by);
+  const byReads = (a: Row, b: Row) => b.reads - a.reads;
   const { daily } = stats;
   return {
     ...stats,
-    totals: {
-      ...stats.totals,
-      views: daily.views[day],
-      reads: daily.reads[day],
-      new: daily.new[day],
-      visitors: daily.visitors[day],
-    },
-    pages: stats.pages
-      .map((p) => ({ ...p, views: p.daily[day], new: p.dailyNew[day] }))
-      .sort((a, b) => b.views - a.views),
-    referrers: stats.referrers
-      .map((r) => ({ ...r, views: r.daily[day], new: r.dailyNew[day] }))
-      .sort((a, b) => b.new - a.new || b.views - a.views),
+    totals:
+      day === null
+        ? stats.totals
+        : {
+            ...stats.totals,
+            views: daily.views[day],
+            reads: daily.reads[day],
+            new: daily.new[day],
+            visitors: daily.visitors[day],
+          },
+    pages: rank(stats.pages, engaged ? byReads : (a, b) => b.views - a.views),
+    referrers: rank(
+      stats.referrers,
+      engaged ? byReads : (a, b) => b.new - a.new || b.views - a.views,
+    ),
   };
 }

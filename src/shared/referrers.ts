@@ -57,6 +57,10 @@ export function canonicalSource(domain: string): string {
     return entry.merge ? root : domain;
 }
 
+// Whether a domain is (under) a well-known one, so has a name and maybe an
+// icon here.
+export const isWellKnown = (domain: string) => lookup(domain) !== null;
+
 function known(domain: string) {
     const entry = lookup(domain)?.[1];
     return entry && !("alias" in entry) ? entry : null;

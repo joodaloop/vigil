@@ -8,8 +8,16 @@ import { theme } from "./theme";
 // Visitors: their number and devices on one side and the countries they came
 // from on the other, then their chart across the panel. While a day is
 // hovered on the main chart (`day`, with `stats` as of it), the number and
-// pages per device are that day's, and it's marked on the chart.
-export function People(props: { stats: HostStats; days: number[]; day: number | null }) {
+// pages per device are that day's, and it's marked on the chart. Picking a
+// country's flag filters by it (`onPick`), or if it's the one `picked`,
+// clears that filter.
+export function People(props: {
+  stats: HostStats;
+  days: number[];
+  day: number | null;
+  picked: string | null;
+  onPick: (code: string | null) => void;
+}) {
   const t = () => props.stats.totals;
   const devices = () => t().devices;
   // Devices, systems and countries are only known for the whole period, so
@@ -56,7 +64,7 @@ export function People(props: { stats: HostStats; days: number[]; day: number | 
           </div>
         </div>
         <div style={periodOnly()}>
-          <Countries items={t().countries} />
+          <Countries items={t().countries} picked={props.picked} onPick={props.onPick} />
         </div>
       </div>
       <Chart
@@ -73,7 +81,8 @@ export function People(props: { stats: HostStats; days: number[]; day: number | 
 }
 
 // A share as a bar, filled to that fraction of its width, with its percentage
-// in the same place, shown instead while the devices and systems are hovered.
+// in the same place, shown instead while space has switched the numbers to
+// percentages.
 function Share(props: { part: number; whole: number }) {
   return (
     <>
@@ -94,12 +103,12 @@ const FLAGS = import.meta.glob<string>("../../node_modules/flag-icons/flags/4x3/
   import: "default",
   eager: true,
 });
-export const flag = (code: string) =>
+const flag = (code: string) =>
   FLAGS[`../../node_modules/flag-icons/flags/4x3/${code.toLowerCase()}.svg`];
 const regionNames = new Intl.DisplayNames(["en"], { type: "region" });
 // A country's name by its code. Cloudflare also gives "T1" for Tor, which
 // isn't a region code (DisplayNames throws on it), and "XX" for unknown.
-export function countryName(code: string) {
+function countryName(code: string) {
   if (code === "T1") return "Tor";
   try {
     return regionNames.of(code) ?? code;
@@ -110,9 +119,21 @@ export function countryName(code: string) {
 
 // A row of flags for the countries visitors came from (the top 16), each with
 // an area proportional to its visitors relative to the top one (at least 8px
-// tall), and its name and numbers on hover.
-function Countries(props: { items: { code: string; visitors: number }[] }) {
-  const shown = () => props.items.filter((c) => flag(c.code)).slice(0, 16);
+// tall), and its name and numbers on hover. Each is a button that filters by
+// its country, or if it's the one `picked`, clears that filter; the picked
+// one is always there, smallest if no one came from it.
+function Countries(props: {
+  items: { code: string; visitors: number }[];
+  picked: string | null;
+  onPick: (code: string | null) => void;
+}) {
+  const shown = () => {
+    const top = props.items.filter((c) => flag(c.code)).slice(0, 16);
+    const p = props.picked;
+    return p === null || !flag(p) || top.some((c) => c.code === p)
+      ? top
+      : [...top, { code: p, visitors: 0 }];
+  };
   const total = () => props.items.reduce((n, c) => n + c.visitors, 0);
   return (
     <div class="countries">
@@ -120,13 +141,17 @@ function Countries(props: { items: { code: string; visitors: number }[] }) {
         {(c) => {
           const name = () => countryName(c.code);
           return (
-            <span title={`${name()}: ${num(c.visitors)} visitors (${pct(c.visitors, total())}%)`}>
+            <button
+              title={`${name()}: ${num(c.visitors)} visitors (${pct(c.visitors, total())}%)`}
+              aria-pressed={c.code === props.picked ? "true" : "false"}
+              onClick={() => props.onPick(c.code === props.picked ? null : c.code)}
+            >
               <img
                 src={flag(c.code)}
                 alt={name()}
-                height={Math.max(8, Math.round(40 * Math.sqrt(c.visitors / shown()[0].visitors)))}
+                height={Math.max(8, Math.round(40 * Math.sqrt(c.visitors / (shown()[0].visitors || 1))))}
               />
-            </span>
+            </button>
           );
         }}
       </For>
