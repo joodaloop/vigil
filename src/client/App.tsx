@@ -105,28 +105,22 @@ export function App(props: { sites: Site[] }) {
   // the sidebar and the main chart; turned on and off by clicking the
   // "engaged" total.
   const [engaged, setEngaged] = createSignal(false);
+  // The sidebar's hosts, most views in the period first, or in engaged mode,
+  // most engaged views (ties keep site order). A hovered day doesn't
+  // reorder them.
+  const byViews = createMemo(() => {
+    const hosts = summaries().hosts;
+    const k = engaged() ? "reads" : "views";
+    const views = (h: Site) => hosts[h.host]?.totals[k] ?? 0;
+    return [...HOSTS].sort((a, b) => views(b) - views(a));
+  });
   // The day hovered or pinned on the main chart (unix seconds), which the
   // sidebar shows too: its index in the sidebar's days, if it's one of them.
   const [hoveredDay, setHoveredDay] = createSignal<number | null>(null);
-  const sidebarDay = createMemo(() => {
+  const sidebarDay = () => {
     const i = hoveredDay() === null ? -1 : summaries().days.indexOf(hoveredDay()!);
     return i < 0 ? null : i;
-  });
-  // The day pinned on the main chart (unix seconds), if any.
-  const [pinnedDay, setPinnedDay] = createSignal<number | null>(null);
-  // The sidebar's hosts, most views first, or in engaged mode, most engaged
-  // views: on the day pinned, if any, else in the period (ties fall back to
-  // the period's numbers, then site order). A hovered day doesn't reorder
-  // them.
-  const byViews = createMemo(() => {
-    const { hosts, days } = summaries();
-    const k = engaged() ? "reads" : "views";
-    const p = pinnedDay();
-    const i = p === null ? -1 : days.indexOf(p);
-    const total = (h: Site) => hosts[h.host]?.totals[k] ?? 0;
-    const onDay = (h: Site) => (i < 0 ? 0 : (hosts[h.host]?.daily[k][i] ?? 0));
-    return [...HOSTS].sort((a, b) => onDay(b) - onDay(a) || total(b) - total(a));
-  });
+  };
   // A new query is on its way: the panel fades a little until it lands.
   const updating = () => isPending(() => view());
 
@@ -244,7 +238,6 @@ export function App(props: { sites: Site[] }) {
               }}
               onFilter={update}
               onDay={setHoveredDay}
-              onPin={setPinnedDay}
               engaged={engaged()}
               onEngaged={() => setEngaged((on) => !on)}
             />
@@ -266,7 +259,6 @@ function Stats(props: {
   filters: Filters;
   onFilter: (change: Partial<Filters>) => void;
   onDay: (day: number | null) => void; // the day hovered or pinned, in unix seconds
-  onPin: (day: number | null) => void; // the day pinned, in unix seconds
   engaged: boolean; // engaged mode (see App)
   onEngaged: () => void; // a click on the engaged total, turning it on or off
 }) {
@@ -388,7 +380,6 @@ function Stats(props: {
             setHovered(t);
             props.onDay(t);
           }}
-          onPin={(i) => props.onPin(i === null ? null : props.days[i])}
         />
       </div>
 

@@ -32,7 +32,6 @@ const chartPadding = (lineWidth: number) => Math.ceil(lineWidth);
 // stays marked and reported, whatever the pointer does, until another day is
 // clicked (pinning that one instead), it is clicked again, or the days
 // change to ones without it (another period that doesn't reach it).
-// `onPin` reports the pinned day's index as it changes; null once unpinned.
 //
 // `marked` marks a day chosen elsewhere (e.g. on another chart) with dots
 // on the lines alone.
@@ -44,7 +43,6 @@ export function Chart(props: {
     maxes?: Record<string, number>;
     headroom?: number;
     onHover?: (i: number | null) => void;
-    onPin?: (i: number | null) => void;
     hoverDelay?: number;
     marked?: number | null;
 }) {
@@ -68,11 +66,6 @@ export function Chart(props: {
     // seconds), to find it again among other days.
     const [pinned, setPinned] = createSignal<number | null>(null);
     let pinnedDay: number | null = null;
-    function pin(i: number | null) {
-        if (i === untrack(pinned)) return;
-        setPinned(i);
-        props.onPin?.(i);
-    }
     // Where the hovered day is drawn, in px from the chart's top left: its x,
     // a dot per line, and how far the plot's baseline is above the chart's
     // bottom edge (its padding), where the day's line stops.
@@ -155,11 +148,11 @@ export function Chart(props: {
         if (pinned() === i) {
             // Back to hovering it (not through onMove, which would still
             // read it as pinned until the next flush).
-            pin(null);
+            setPinned(null);
             markDay(plot, i, false);
             hover(i);
         } else {
-            pin(i);
+            setPinned(i);
             pinnedDay = props.days[i];
             markDay(plot, i, true);
             hover(i);
@@ -173,11 +166,11 @@ export function Chart(props: {
         if (pinned() === null) return;
         const i = props.days.indexOf(pinnedDay!);
         if (i >= 0) {
-            pin(i);
+            setPinned(i);
             markDay(u, i, true);
             hover(i);
         } else {
-            pin(null);
+            setPinned(null);
             pinnedDay = null;
             setMark(null);
             hover(null);
