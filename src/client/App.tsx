@@ -105,22 +105,24 @@ export function App(props: { sites: Site[] }) {
   // the sidebar and the main chart; turned on and off by clicking the
   // "engaged" total.
   const [engaged, setEngaged] = createSignal(false);
-  // The sidebar's hosts, most views in the period first, or in engaged mode,
-  // most engaged views (ties keep site order). A hovered day doesn't
-  // reorder them.
-  const byViews = createMemo(() => {
-    const hosts = summaries().hosts;
-    const k = engaged() ? "reads" : "views";
-    const views = (h: Site) => hosts[h.host]?.totals[k] ?? 0;
-    return [...HOSTS].sort((a, b) => views(b) - views(a));
-  });
   // The day hovered or pinned on the main chart (unix seconds), which the
   // sidebar shows too: its index in the sidebar's days, if it's one of them.
   const [hoveredDay, setHoveredDay] = createSignal<number | null>(null);
-  const sidebarDay = () => {
+  const sidebarDay = createMemo(() => {
     const i = hoveredDay() === null ? -1 : summaries().days.indexOf(hoveredDay()!);
     return i < 0 ? null : i;
-  };
+  });
+  // The sidebar's hosts, most views first, or in engaged mode, most engaged
+  // views: on the day hovered or pinned, if any, else in the period (ties
+  // fall back to the period's numbers, then site order).
+  const byViews = createMemo(() => {
+    const hosts = summaries().hosts;
+    const k = engaged() ? "reads" : "views";
+    const i = sidebarDay();
+    const total = (h: Site) => hosts[h.host]?.totals[k] ?? 0;
+    const onDay = (h: Site) => (i === null ? 0 : (hosts[h.host]?.daily[k][i] ?? 0));
+    return [...HOSTS].sort((a, b) => onDay(b) - onDay(a) || total(b) - total(a));
+  });
   // A new query is on its way: the panel fades a little until it lands.
   const updating = () => isPending(() => view());
 
