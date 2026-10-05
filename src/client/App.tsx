@@ -348,7 +348,9 @@ function Stats(props: {
                 </select>
               </div>
               <Show when={day() !== null}>
-                <span class="host-day">— {dayOf(props.days[day()!] * 1000)}</span>
+                <span class="host-day">
+                  — {dayOf(props.days[day()!] * 1000, !isMonth(props.days.length, props.ago))}
+                </span>
               </Show>
             </div>
           </div>
@@ -483,13 +485,20 @@ function periods(): { key: string; label: string }[] {
 }
 const periodKey = (days: number, ago: number) => `${days} ${ago}`;
 
-// "Saturday, 15th": a day hovered, after its period's name.
+// Whether the period is one of the months, named as such.
+const isMonth = (days: number, ago: number) =>
+  periods().findIndex((p) => p.key === periodKey(days, ago)) > 0;
+
+// "Saturday, 15th": a day hovered, after its period's name; with its month
+// ("Saturday, 15th August") when that name isn't a month's.
 const weekday = new Intl.DateTimeFormat("en", { weekday: "long", timeZone: "UTC" });
+const month = new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" });
 const ordinal = new Intl.PluralRules("en", { type: "ordinal" });
 const SUFFIX: Record<string, string> = { one: "st", two: "nd", few: "rd", other: "th" };
-function dayOf(ms: number): string {
+function dayOf(ms: number, withMonth: boolean): string {
   const d = new Date(ms).getUTCDate();
-  return `${weekday.format(ms)}, ${d}${SUFFIX[ordinal.select(d)]}`;
+  const day = `${weekday.format(ms)}, ${d}${SUFFIX[ordinal.select(d)]}`;
+  return withMonth ? `${day} ${month.format(ms)}` : day;
 }
 
 // The stats as of a day hovered on the main chart (`day`), or the period's:
