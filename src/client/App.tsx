@@ -132,14 +132,20 @@ export function App(props: { sites: Site[] }) {
   const updating = () => isPending(() => view());
 
   // From the query as last set, which a read of `query()` doesn't give until
-  // the next flush, so two changes in a row both count.
+  // the next flush, so two changes in a row both count. Each is a step back.
   function update(change: Partial<Query>) {
     setQuery((q) => {
       const next = { ...q, ...change };
-      history.replaceState(null, "", `?${toParams(next)}`);
+      history.pushState(null, "", `?${toParams(next)}`);
       return next;
     });
   }
+  // Back and forward show the query in the address they land on.
+  onSettled(() => {
+    const onPop = () => setQuery(initialQuery(HOSTS));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  });
 
   // Nothing is shown until both the sidebar and the panel have their first
   // numbers, so they arrive together.
@@ -279,16 +285,29 @@ function Stats(props: {
   // In engaged mode, the lists ranked by engaged views instead.
   const shown = createMemo(() => onDay(props.stats, day(), props.engaged));
   const st = () => shown().totals;
-  // Space switches the numbers to percentages and back (but not
-  // while a control has focus, which space would press).
+  // Space switches the numbers to percentages and back, and shift with the
+  // left and right arrows picks the period before and after this one (but not while a
+  // control has focus, which they'd work instead).
   const [asPct, setAsPct] = createSignal(false);
   onSettled(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== " " || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if ((e.target as Element).closest("button, a, select, input, textarea, [contenteditable]"))
         return;
-      e.preventDefault(); // or it would scroll the page
-      setAsPct((p) => !p);
+      if (e.key === " " && !e.repeat) {
+        e.preventDefault(); // or it would scroll the page
+        setAsPct((p) => !p);
+      } else if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        // Most recent first, so earlier is further down the list. A period
+        // not in it goes to the most recent.
+        const list = periods();
+        const i = list.findIndex((p) => p.key === periodKey(props.days.length, props.ago));
+        const to = i < 0 ? 0 : i + (e.key === "ArrowLeft" ? 1 : -1);
+        if (to < 0 || to >= list.length || to === i) return;
+        e.preventDefault();
+        const [days, ago] = list[to].key.split(" ").map(Number);
+        props.onPeriod(days, ago);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
