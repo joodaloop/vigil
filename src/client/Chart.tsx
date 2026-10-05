@@ -18,7 +18,9 @@ export const filled = (values: (number | null)[], color: string, light = true): 
 // Top of a scale's 0..top range, given the largest value on it.
 const scaleTop = (max: number) => (max > 0 ? max * 1.05 : 1);
 
-// Padding around the plot, so thick lines at the edges aren't clipped.
+// Padding above and below the plot, so thick lines along its top and bottom
+// aren't clipped. None at the sides, where the lines run on past the ends
+// (see the placeholder days), so the plot reaches the chart's edges.
 const chartPadding = (lineWidth: number) => Math.ceil(lineWidth);
 
 // A bare line chart: no axes, grid, legend or cursor. Lines on the same scale
@@ -281,7 +283,7 @@ export function Chart(props: {
             {
                 width: el.clientWidth,
                 height: height(),
-                padding: [pad + (props.headroom ?? 0), pad, pad, pad],
+                padding: [pad + (props.headroom ?? 0), 0, pad, 0],
                 scales,
                 series,
                 axes: [{ show: false }, { show: false }],
