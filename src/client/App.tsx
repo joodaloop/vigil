@@ -112,15 +112,19 @@ export function App(props: { sites: Site[] }) {
     const i = hoveredDay() === null ? -1 : summaries().days.indexOf(hoveredDay()!);
     return i < 0 ? null : i;
   });
+  // The day pinned on the main chart (unix seconds), if any.
+  const [pinnedDay, setPinnedDay] = createSignal<number | null>(null);
   // The sidebar's hosts, most views first, or in engaged mode, most engaged
-  // views: on the day hovered or pinned, if any, else in the period (ties
-  // fall back to the period's numbers, then site order).
+  // views: on the day pinned, if any, else in the period (ties fall back to
+  // the period's numbers, then site order). A hovered day doesn't reorder
+  // them.
   const byViews = createMemo(() => {
-    const hosts = summaries().hosts;
+    const { hosts, days } = summaries();
     const k = engaged() ? "reads" : "views";
-    const i = sidebarDay();
+    const p = pinnedDay();
+    const i = p === null ? -1 : days.indexOf(p);
     const total = (h: Site) => hosts[h.host]?.totals[k] ?? 0;
-    const onDay = (h: Site) => (i === null ? 0 : (hosts[h.host]?.daily[k][i] ?? 0));
+    const onDay = (h: Site) => (i < 0 ? 0 : (hosts[h.host]?.daily[k][i] ?? 0));
     return [...HOSTS].sort((a, b) => onDay(b) - onDay(a) || total(b) - total(a));
   });
   // A new query is on its way: the panel fades a little until it lands.
@@ -240,6 +244,7 @@ export function App(props: { sites: Site[] }) {
               }}
               onFilter={update}
               onDay={setHoveredDay}
+              onPin={setPinnedDay}
               engaged={engaged()}
               onEngaged={() => setEngaged((on) => !on)}
             />
@@ -261,6 +266,7 @@ function Stats(props: {
   filters: Filters;
   onFilter: (change: Partial<Filters>) => void;
   onDay: (day: number | null) => void; // the day hovered or pinned, in unix seconds
+  onPin: (day: number | null) => void; // the day pinned, in unix seconds
   engaged: boolean; // engaged mode (see App)
   onEngaged: () => void; // a click on the engaged total, turning it on or off
 }) {
@@ -382,6 +388,7 @@ function Stats(props: {
             setHovered(t);
             props.onDay(t);
           }}
+          onPin={(i) => props.onPin(i === null ? null : props.days[i])}
         />
       </div>
 
