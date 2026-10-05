@@ -12,11 +12,12 @@ import {
 import { type Sparse, toDense } from "../shared/series";
 import type { HostStats, HostSummaries, Overview, PageRow, Referrer, Site } from "../shared/types";
 import { get, remember } from "./api";
-import { Chart } from "./Chart";
+import { Chart, filled } from "./Chart";
 import { DEFAULT_PERIOD } from "./config";
 import { fullDate, num, pct } from "./format";
 import { Pages, Referrers, sparkline } from "./lists";
 import { People } from "./people";
+import { onShortcut } from "./keys";
 import { Shortcuts } from "./shortcuts";
 import { storedFlag } from "./stored";
 import { theme } from "./theme";
@@ -154,22 +155,17 @@ export function App(props: { sites: Site[] }) {
     return () => window.removeEventListener("popstate", onPop);
   });
   // Escape twice in quick succession focuses the sidebar's first host (that
-  // can be opened), anywhere but a text field.
+  // can be opened).
   let escapedAt = -Infinity;
-  onSettled(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      if ((e.target as Element).closest("input, textarea, [contenteditable]")) return;
-      const now = performance.now();
-      if (now - escapedAt < 400) {
-        escapedAt = -Infinity;
-        document.querySelector<HTMLElement>(".sidebar .host-name:not(:disabled)")?.focus();
-      } else {
-        escapedAt = now;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+  onShortcut((e) => {
+    if (e.key !== "Escape" || e.repeat || e.shiftKey) return;
+    const now = performance.now();
+    if (now - escapedAt < 400) {
+      escapedAt = -Infinity;
+      document.querySelector<HTMLElement>(".sidebar .host-name:not(:disabled)")?.focus();
+    } else {
+      escapedAt = now;
+    }
   });
 
   // Nothing is shown until both the sidebar and the panel have their first
@@ -345,44 +341,36 @@ function Stats(props: {
   // "." switches the numbers to percentages and back, "," the lists' names
   // to their addresses and paths and back, "/" engaged mode on and off,
   // Backspace clears every filter, "[" and "]" pick the period before and
-  // after this one, and "\" the most recent; anywhere but a text field,
-  // where they'd type or move the caret, and not when something else has
-  // taken the key. While new stats load, "[" and "]" do nothing, as they'd
-  // only pick from the period still shown.
+  // after this one, and "\" the most recent. While new stats load, "[" and
+  // "]" do nothing, as they'd only pick from the period still shown.
   // Both remembered in this browser.
   const [asPct, setAsPct] = storedFlag("vigil:percentages", false);
   const [asAddress, setAsAddress] = storedFlag("vigil:addresses", false);
-  onSettled(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
-      if ((e.target as Element).closest("input, textarea, [contenteditable]")) return;
-      if (e.key === "." && !e.repeat) {
-        setAsPct((p) => !p);
-      } else if (e.key === "," && !e.repeat) {
-        setAsAddress((a) => !a);
-      } else if (e.key === "/" && !e.repeat) {
-        e.preventDefault(); // or Firefox opens its quick find
-        props.onEngaged();
-      } else if (e.key === "Backspace" && !e.repeat && !e.shiftKey) {
-        const f = props.filters;
-        if (f.page === null && f.source === null && f.country === null) return;
-        e.preventDefault();
-        props.onFilter({ page: null, source: null, country: null });
-      } else if (!e.shiftKey && (e.key === "[" || e.key === "]" || e.key === "\\")) {
-        // Most recent first, so earlier is further down the list. A period
-        // not in it goes to the most recent.
-        const list = periods();
-        const i = list.findIndex((p) => p.key === periodKey(props.days.length, props.ago));
-        const to = e.key === "\\" || i < 0 ? 0 : i + (e.key === "[" ? 1 : -1);
-        if (to < 0 || to >= list.length || to === i) return;
-        e.preventDefault();
-        if (props.updating) return;
-        const [days, ago] = list[to].key.split(" ").map(Number);
-        props.onPeriod(days, ago);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+  onShortcut((e) => {
+    if (e.key === "." && !e.repeat) {
+      setAsPct((p) => !p);
+    } else if (e.key === "," && !e.repeat) {
+      setAsAddress((a) => !a);
+    } else if (e.key === "/" && !e.repeat) {
+      e.preventDefault(); // or Firefox opens its quick find
+      props.onEngaged();
+    } else if (e.key === "Backspace" && !e.repeat && !e.shiftKey) {
+      const f = props.filters;
+      if (f.page === null && f.source === null && f.country === null) return;
+      e.preventDefault();
+      props.onFilter({ page: null, source: null, country: null });
+    } else if (!e.shiftKey && (e.key === "[" || e.key === "]" || e.key === "\\")) {
+      // Most recent first, so earlier is further down the list. A period
+      // not in it goes to the most recent.
+      const list = periods();
+      const i = list.findIndex((p) => p.key === periodKey(props.days.length, props.ago));
+      const to = e.key === "\\" || i < 0 ? 0 : i + (e.key === "[" ? 1 : -1);
+      if (to < 0 || to >= list.length || to === i) return;
+      e.preventDefault();
+      if (props.updating) return;
+      const [days, ago] = list[to].key.split(" ").map(Number);
+      props.onPeriod(days, ago);
+    }
   });
 
   return (
@@ -471,19 +459,13 @@ function Stats(props: {
         <Chart
           days={props.days}
           lines={
-            // Views and new visitors, each over a light fill (both fills under
-            // both lines); or in engaged mode, engaged views alone, filled
-            // solid.
+            // Views and new visitors, each over a light fill; or in engaged
+            // mode, engaged views alone, filled solid.
             props.engaged
-              ? [
-                  { values: props.stats.daily.reads, color: theme.stats.views, scale: "count", area: true },
-                  { values: props.stats.daily.reads, color: theme.stats.views, scale: "count" },
-                ]
+              ? filled(props.stats.daily.reads, theme.stats.views, false)
               : [
-                  { values: props.stats.daily.views, color: theme.stats.views, scale: "count", area: true, light: true },
-                  { values: props.stats.daily.new, color: theme.stats.new, scale: "count", area: true, light: true },
-                  { values: props.stats.daily.views, color: theme.stats.views, scale: "count" },
-                  { values: props.stats.daily.new, color: theme.stats.new, scale: "count" },
+                  ...filled(props.stats.daily.views, theme.stats.views),
+                  ...filled(props.stats.daily.new, theme.stats.new),
                 ]
           }
           height={160}

@@ -1,6 +1,6 @@
 import { For } from "solid-js";
 import type { HostStats } from "../shared/types";
-import { Chart } from "./Chart";
+import { Chart, filled } from "./Chart";
 import { num, pct, perDevice } from "./format";
 import { DeviceIcon, OsIcon } from "./icons";
 import { theme } from "./theme";
@@ -68,10 +68,7 @@ export function People(props: {
       </div>
       <Chart
         days={props.days}
-        lines={[
-          { values: props.stats.daily.visitors, color: theme.stats.visitors, scale: "count", area: true, light: true },
-          { values: props.stats.daily.visitors, color: theme.stats.visitors, scale: "count" },
-        ]}
+        lines={filled(props.stats.daily.visitors, theme.stats.visitors)}
         height={120}
         lineWidth={2}
         marked={props.day}

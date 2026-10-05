@@ -1,5 +1,6 @@
 import { createEffect, createSignal, For, onSettled, Show, untrack } from "solid-js";
 import uPlot from "uplot";
+import { onShortcut } from "./keys";
 import "uplot/dist/uPlot.min.css";
 
 // `scale` groups lines that share a y axis (e.g. "count", "ratio"); `area`
@@ -7,6 +8,12 @@ import "uplot/dist/uPlot.min.css";
 // `light`, a light one (its colour must then be #rrggbb). Lines are drawn
 // in order, later ones over earlier ones.
 export type Line = { values: (number | null)[]; color: string; scale: string; area?: boolean; light?: boolean };
+
+// A count's line over a fill in its colour, light or (unless `light`) solid.
+export const filled = (values: (number | null)[], color: string, light = true): Line[] => [
+    { values, color, scale: "count", area: true, light },
+    { values, color, scale: "count" },
+];
 
 // Top of a scale's 0..top range, given the largest value on it.
 const scaleTop = (max: number) => (max > 0 ? max * 1.05 : 1);
@@ -291,23 +298,19 @@ export function Chart(props: {
     onSettled(() => {
         const observer = new ResizeObserver(() => plot?.setSize({ width: el.clientWidth, height: height() }));
         observer.observe(el);
-        // Anywhere but a text field or the period's select (whose own the
-        // arrows are), and not when something else has taken the key.
-        const onKey = (e: KeyboardEvent) => {
-            if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.defaultPrevented) return;
-            if ((e.target as Element).closest("input, textarea, select, [contenteditable]")) return;
-            const by = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
-            if (by !== undefined) {
-                if (movePin(by)) e.preventDefault();
-            } else if (e.key === "Escape") unpin();
-        };
-        window.addEventListener("keydown", onKey);
         return () => {
             resetHoverDelay();
             observer.disconnect();
-            window.removeEventListener("keydown", onKey);
             plot?.destroy();
         };
+    });
+
+    onShortcut((e) => {
+        if (e.shiftKey) return;
+        const by = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+        if (by !== undefined) {
+            if (movePin(by)) e.preventDefault();
+        } else if (e.key === "Escape") unpin();
     });
 
     // Follow `marked`.

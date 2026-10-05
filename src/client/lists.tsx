@@ -1,10 +1,11 @@
-import { createMemo, createSignal, flush, For, onSettled, Show } from "solid-js";
+import { createMemo, createSignal, flush, For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import type { PageRow, Referrer } from "../shared/types";
 import { referrerIcon, referrerName } from "../shared/referrers";
-import { Chart, type Line } from "./Chart";
+import { Chart, filled, type Line } from "./Chart";
 import { num, pct, share } from "./format";
 import { SourceIcon } from "./icons";
+import { onShortcut } from "./keys";
 import { theme } from "./theme";
 
 // Pages by views; picking one filters by it. The number keys pick its pages.
@@ -189,10 +190,8 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
 
 // A sparkline's lines: views as a line over a light fill, or engaged views
 // filled solid.
-export const sparkline = (values: number[], engaged: boolean): Line[] => [
-  { values, color: theme.stats.views, scale: "count", area: true, light: !engaged },
-  { values, color: theme.stats.views, scale: "count" },
-];
+export const sparkline = (values: number[], engaged: boolean): Line[] =>
+  filled(values, theme.stats.views, !engaged);
 
 // A source's address, without its scheme: a page on the site itself
 // ("blog.example/posts/x"), or the referring site ("someblog.com").
@@ -277,19 +276,13 @@ function Paged<T>(props: {
     setPage(next);
     (e.currentTarget.children[next] as HTMLElement | undefined)?.focus();
   };
-  onSettled(() => {
-    if (!props.pageKeys) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.defaultPrevented || e.repeat) return;
-      if ((e.target as Element).closest("input, textarea, [contenteditable]")) return;
-      const page = props.pageKeys!.indexOf(e.key);
-      if (page < 0 || page >= pages()) return;
-      setPage(page);
-      flush(); // so the page's rows are there to focus
-      (rows.firstElementChild as HTMLElement | null)?.focus();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+  onShortcut((e) => {
+    if (e.shiftKey || e.repeat || !props.pageKeys) return;
+    const page = props.pageKeys.indexOf(e.key);
+    if (page < 0 || page >= pages()) return;
+    setPage(page);
+    flush(); // so the page's rows are there to focus
+    (rows.firstElementChild as HTMLElement | null)?.focus();
   });
 
   return (

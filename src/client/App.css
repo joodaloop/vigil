@@ -50,13 +50,11 @@ button:disabled {
   cursor: default;
 }
 
-/* The one focus style. Selects are invisible over what they show, so that
-   shows their focus. On its edge by default: sites and page numbers have
+/* The one focus style. On its edge by default: flags and page numbers have
    padding to spare, and rows touch, so one any further out would cover its
-   neighbours'. */
+   neighbours'. (The period's select has it too; see below.) */
 button:focus-visible,
-a:focus-visible,
-:has(> select:focus-visible) {
+a:focus-visible {
   outline: 1px solid var(--text);
   outline-offset: 0;
 }
@@ -156,14 +154,14 @@ main {
   padding: 1.5rem calc(1.75rem - var(--item-pad)); /* the shortcuts as near the bottom as the intro is the top */
 }
 
-/* The keyboard shortcuts, at the sidebar's end (at least 2rem below the
+/* The keyboard shortcuts, at the sidebar's end (at least 6rem below the
    hosts): a key or two, then what it does, one under another. */
 .shortcuts {
   display: flex;
   flex-direction: column;
   gap: 1.25rem; /* between the groups */
   margin-top: auto;
-  padding-top: 2rem;
+  padding-top: 8rem;
 }
 
 /* Inset like the intro, so they line up. */
@@ -244,9 +242,16 @@ h1 {
   background: var(--text);
 }
 
-/* Its background is the focus outline's colour: a gap keeps that seen. */
-.host-name[aria-pressed="true"]:focus-visible {
-  outline-offset: 1px;
+/* Buttons drawn as a block of colour have their focus outline a little way
+   out from it, as far as the flags' and the pager's are from what they
+   show (their buttons' padding), and so it's seen against a selected host's
+   background, the outline's colour. The period's select is invisible over
+   the block it shows, so that shows its focus. */
+.host-name:focus-visible,
+.engaged-toggle:focus-visible,
+.host-dates:has(> select:focus-visible) {
+  outline: 1px solid var(--text);
+  outline-offset: 3px;
 }
 
 .host-nums {
@@ -596,11 +601,15 @@ select option {
 }
 
 /* A page or referrer: its name, a sparkline of its views, then its views
-   and new visitors. A button that filters by it. It has side padding, for
-   room around its focus outline, and is pulled out by it so its text stays
-   in line with the rest of the panel. */
+   and new visitors, over a bar of its share (see below). A button that
+   filters by it. It has side padding, for room around its focus outline,
+   and is pulled out by it so its text stays in line with the rest of the
+   panel. */
 .row {
   --row-pad: 4px;
+  --tail: calc(1rem + var(--spark) + 2 * var(--num) + 2 * 0.5rem + var(--row-pad));
+  position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--spark) var(--num) var(--num);
   /* One row the row's height, so everything centres on it, the sparkline
@@ -659,12 +668,6 @@ select option {
    short of the sparkline. `--tail` is everything after that column: the
    1rem, the sparkline, the two numbers, the gaps between them and the row's
    right padding. */
-.row {
-  --tail: calc(1rem + var(--spark) + 2 * var(--num) + 2 * 0.5rem + var(--row-pad));
-  position: relative;
-  isolation: isolate;
-}
-
 .row::before {
   content: "";
   position: absolute;
