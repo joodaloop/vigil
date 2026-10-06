@@ -24,7 +24,7 @@ export default {
             return new Response("COOKIE_SECRET is not set", { status: 500 });
         }
         if (pathname === "/_v/hit" && request.method === "POST") {
-            return handleHit(request, env, ctx);
+            return handleHit(request, env);
         }
         if (pathname === "/_v/read" && request.method === "POST") {
             return handleRead(request, env);
@@ -37,7 +37,7 @@ export default {
             return handleIcon(url, env);
         }
         if (pathname.startsWith("/api/")) {
-            return handleApi(url, env);
+            return handleApi(url, env, ctx);
         }
 
         return new Response("Not found", { status: 404 });

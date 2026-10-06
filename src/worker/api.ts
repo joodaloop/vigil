@@ -3,6 +3,7 @@ import type { Sparse } from "../shared/series";
 import type { HostStats, HostSummaries, Overview, PageRow, Referrer } from "../shared/types";
 import { countrySums, type Filters, filteredVisitors } from "./hitQueries";
 import { configuredSites } from "./sites";
+import { FETCHES, type Lookup, lookUpDue, REFRESH } from "./sources";
 
 // GET /api/overview?host=blog.example.co.uk&days=30
 //   Totals, daily series, referrers and pages for one site.
@@ -32,8 +33,8 @@ type PeopleRow = {
     visitors: number;
     bounced: number;
 };
-type SourceInfoRow = { domain: string; name: string | null; icon: number | null };
-type PageTitleRow = { path: string; title: string };
+type SourceInfoRow = { domain: string; name: string | null; icon: number | null; claimed_ts: number };
+type PageTitleRow = { path: string; title: string | null; claimed_ts: number };
 type HostDailyRow = { host: string; day: number; views: number; new: number; reads: number };
 
 // The first and last days (UTC day numbers) of the `numDays` ending `ago`
@@ -63,7 +64,14 @@ function emptyHost(n: number): HostStats<Sparse> {
     };
 }
 
-async function overview(env: Env, host: string, numDays: number, ago: number, filters: Filters): Promise<Overview<Sparse>> {
+async function overview(
+    env: Env,
+    ctx: ExecutionContext,
+    host: string,
+    numDays: number,
+    ago: number,
+    filters: Filters,
+): Promise<Overview<Sparse>> {
     const { page, source, country } = filters;
     const { firstDay, lastDay, days } = period(numDays, ago);
     const result: Overview<Sparse> = { days, stats: emptyHost(numDays) };
@@ -168,21 +176,25 @@ async function overview(env: Env, host: string, numDays: number, ago: number, fi
         if (!s) bySource.set(r.source, (s = { source: r.source, ...noNumbers() }));
         add(s, r);
     }
+    stats.referrers = [...bySource.values()].sort((a, b) => b.new - a.new || b.views - a.views);
+
     // What's been read from pages (schema.sql), for exactly the rows above:
     // the site's icon, other sites' names and icons (not the well-known
     // ones', which have none), and pages' titles, for their rows and for
     // the referrers they are when clicked through from. Each list is one
-    // JSON parameter, and each lookup reads only the rows it finds.
-    const sourceKeys = [...bySource.keys()];
-    const domains = [host, ...sourceKeys.filter((s) => !s.startsWith("/") && !isWellKnown(s))];
-    const paths = [...new Set([...byPage.keys(), ...sourceKeys.filter((s) => s.startsWith("/"))])];
+    // JSON parameter, and each lookup reads only the rows it finds. Both
+    // lists are in the order they're shown.
+    const sourceKeys = stats.referrers.map((r) => r.source);
+    // (A link from "www." of the site itself is recorded as the site's own
+    // domain, not a path; it's looked up as the site, below.)
+    const domains = [host, ...sourceKeys.filter((s) => !s.startsWith("/") && s !== host && !isWellKnown(s))];
+    const paths = [...new Set([...stats.pages.map((p) => p.path), ...sourceKeys.filter((s) => s.startsWith("/"))])];
     const [sourceInfo, titles] = (await env.DB.batch([
         env.DB.prepare(
-            `SELECT domain, name, icon_ts AS icon FROM sources WHERE domain IN (SELECT value FROM json_each(?1))`,
+            `SELECT domain, name, icon_ts AS icon, claimed_ts FROM sources WHERE domain IN (SELECT value FROM json_each(?1))`,
         ).bind(JSON.stringify(domains)),
         env.DB.prepare(
-            `SELECT path, title FROM pages
-             WHERE host = ?1 AND path IN (SELECT value FROM json_each(?2)) AND title IS NOT NULL`,
+            `SELECT path, title, claimed_ts FROM pages WHERE host = ?1 AND path IN (SELECT value FROM json_each(?2))`,
         ).bind(host, JSON.stringify(paths)),
     ])) as [D1Result<SourceInfoRow>, D1Result<PageTitleRow>];
     for (const r of sourceInfo.results) {
@@ -192,12 +204,35 @@ async function overview(env: Env, host: string, numDays: number, ago: number, fi
         if (s && r.icon !== null) s.icon = r.icon;
     }
     for (const r of titles.results) {
+        if (r.title === null) continue;
         const p = byPage.get(r.path);
         if (p) p.title = r.title;
         const s = bySource.get(r.path);
         if (s) s.name = r.title;
     }
-    stats.referrers = [...bySource.values()].sort((a, b) => b.new - a.new || b.views - a.views);
+
+    // Those not looked up yet, or not for 30 days, are looked up once this
+    // has answered: pages, then the site itself if it's listed as a referrer
+    // (its icon is shown beside clicks within it), then other referring
+    // sites, as many as FETCHES has room for without redirects (a page takes
+    // one request, a site two). The claims (sources.ts) settle which of two
+    // loads at once does each.
+    const sourceClaims = new Map(sourceInfo.results.map((r) => [r.domain, r.claimed_ts]));
+    const pageClaims = new Map(titles.results.map((r) => [r.path, r.claimed_ts]));
+    const stale = Date.now() / 1000 - REFRESH;
+    const isDue = (claimed: number | undefined) => claimed === undefined || claimed < stale;
+    const shownDomains = sourceKeys.some((s) => s.startsWith("/") || s === host) ? domains : domains.slice(1);
+    const due: Lookup[] = [];
+    let requests = 0;
+    for (const l of [
+        ...paths.filter((p) => isDue(pageClaims.get(p))).map((path) => ({ path })),
+        ...shownDomains.filter((d) => isDue(sourceClaims.get(d))).map((domain) => ({ domain })),
+    ]) {
+        requests += "path" in l ? 1 : 2;
+        if (requests > FETCHES) break;
+        due.push(l);
+    }
+    if (due.length > 0) ctx.waitUntil(lookUpDue(env, host, due));
 
     for (const r of visitorsByDay?.results ?? []) stats.daily.visitors[r.day - firstDay] = r.visitors;
 
@@ -285,7 +320,7 @@ async function hostSummaries(env: Env, hosts: string[], numDays: number, ago: nu
     return result;
 }
 
-export async function handleApi(url: URL, env: Env): Promise<Response> {
+export async function handleApi(url: URL, env: Env, ctx: ExecutionContext): Promise<Response> {
     const json = (body: unknown) => Response.json(body, { headers: { "Cache-Control": "no-store" } });
     if (url.pathname === "/api/config") return json({ sites: configuredSites(env) });
 
@@ -294,12 +329,14 @@ export async function handleApi(url: URL, env: Env): Promise<Response> {
 
     if (url.pathname === "/api/overview") {
         const host = (url.searchParams.get("host") ?? "").toLowerCase();
+        // Only configured sites have hits, and only theirs are looked up.
+        if (!configuredSites(env).some((s) => s.host === host)) return new Response("Not found", { status: 404 });
         const filters = {
             page: url.searchParams.get("page") || null,
             source: url.searchParams.get("source") || null,
             country: url.searchParams.get("country") || null,
         };
-        return json(await overview(env, host, days, ago, filters));
+        return json(await overview(env, ctx, host, days, ago, filters));
     }
     if (url.pathname === "/api/hosts") {
         const hosts = configuredSites(env).map((s) => s.host);

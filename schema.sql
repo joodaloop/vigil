@@ -49,8 +49,7 @@ CREATE INDEX IF NOT EXISTS hits_source ON hits (host, source, ts, visitor_id);
 
 -- Everything under a country filter, which `views` doesn't break down by: a
 -- country's hits in a period with all that's summed or listed, read from the
--- index alone. (It replaced a narrower hits_country, for visitors only.)
-DROP INDEX IF EXISTS hits_country;
+-- index alone.
 CREATE INDEX IF NOT EXISTS hits_by_country ON hits (host, country, ts, page, source, read, is_new, visitor_id);
 
 
@@ -78,11 +77,6 @@ CREATE TABLE IF NOT EXISTS visitors (
 ) STRICT, WITHOUT ROWID;
 
 -- Everything the dashboard's visitor counts need, so they read only this.
--- (It replaced visitors_recent and visitors_seen, which lacked country and
--- OS, and then visitors_period, which lacked browser.)
-DROP INDEX IF EXISTS visitors_recent;
-DROP INDEX IF EXISTS visitors_seen;
-DROP INDEX IF EXISTS visitors_period;
 CREATE INDEX IF NOT EXISTS visitors_in_period ON visitors (host, last_ts, first_ts, device, country, os, browser);
 
 
@@ -116,16 +110,19 @@ CREATE TABLE IF NOT EXISTS views (
 -- its home page. Shared by every site, as a domain is the same whichever it
 -- linked to.
 --
--- A row is claimed by the first hit on or from its domain, and again by the
--- first 30 days after; that hit's Worker then fetches the home page and fills
--- it in (src/worker/sources.ts). Until then, and when there's none,
--- the dashboard shows the domain, and DuckDuckGo's icon for it.
+-- A row is claimed by the first dashboard load that shows its domain (for a
+-- site's own, beside clicks within it) and has room under its cap for it, and
+-- again likewise 30 days after; that load's Worker then fetches the home page
+-- and fills it in (src/worker/sources.ts), for the next load to show.
+-- Until then, and when there's none, the dashboard shows the domain, and
+-- DuckDuckGo's icon for it.
 --
 --   name       its og:site_name, or the first part of its <title>
 --   icon       its favicon, when there's one of at most 30 KB
 --   icon_ts    when that icon was saved (kept while it's unchanged): its
 --              version, so a new one replaces it in browsers' caches
---   claimed_ts when it was last claimed
+--   claimed_ts when it was last looked up; while a lookup is under way,
+--              a time that falls due again in 5 minutes, should it not finish
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS sources (
     domain     TEXT PRIMARY KEY,  -- "someblog.com", as in hits.source
@@ -141,13 +138,14 @@ CREATE TABLE IF NOT EXISTS sources (
 -- pages: each page's title, read from the page itself, for the dashboard to
 -- show in place of its path (src/worker/sources.ts).
 --
--- A row is claimed by the page's first hit, and again by its first 30 days
--- after; that hit's Worker then fetches the page and fills it in, along with
--- its site's favicon (in `sources`) if the site's row was claimed too. Until
--- then, and for a page without one, the dashboard shows the path.
+-- A row is claimed by the first dashboard load that shows the page and has
+-- room under its cap for it, and again likewise 30 days after; that load's
+-- Worker then fetches the page and fills it in. Until then, and for a page
+-- without one, the dashboard shows the path.
 --
 --   title      its og:title, or else its <title>
---   claimed_ts when it was last claimed
+--   claimed_ts when it was last looked up; while a lookup is under way,
+--              a time that falls due again in 5 minutes, should it not finish
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS pages (
     host       TEXT NOT NULL,

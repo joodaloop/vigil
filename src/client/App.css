@@ -8,6 +8,9 @@
   --num: 2.3rem; /* each number column in the lists */
   --row: 26px; /* each row in the lists */
   --spark: 3rem; /* the lists' sparklines */
+  --sidebar: 19rem;
+  --item-pad: 0.75rem; /* each host's side padding in the sidebar */
+  --side-pad: calc(1.75rem - var(--item-pad)); /* the sidebar's own, inset to match */
 }
 
 ::selection {
@@ -115,12 +118,26 @@ a:focus-visible {
 
 /* Hosts down the left, the open one in full on the right. */
 main {
-  --sidebar: 19rem;
   display: grid;
   grid-template-columns: var(--sidebar) minmax(0, 1fr);
   max-width: 68.4rem; /* panel: about 49rem, just room for the lists side by side */
   min-height: 100vh;
   margin: 0 auto;
+}
+
+/* While the page loads: the sidebar's intro alone, as wide as in the
+   sidebar, in the middle of the screen. */
+.loading {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 1.5rem var(--gutter);
+}
+
+.loading .sidebar-top {
+  width: calc(var(--sidebar) - 2 * var(--side-pad));
+  max-width: 100%;
+  margin: 0;
 }
 
 /* ---- Charts ---- */
@@ -184,7 +201,6 @@ main {
    rest of the sidebar is inset to match. At least the screen's height, not
    the page's, so the shortcuts at its end are on the first screen. */
 .sidebar {
-  --item-pad: 0.75rem; /* each host's side padding */
   --count: 2.6rem; /* each host's numbers, wide enough for "99.9k" */
   --count-gap: 0.6rem;
   display: flex;
@@ -192,7 +208,6 @@ main {
   align-self: start;
   min-width: 0;
   min-height: 100vh;
-  --side-pad: calc(1.75rem - var(--item-pad));
   padding: 1.5rem var(--side-pad); /* the shortcuts as near the bottom as the intro is the top */
 }
 
@@ -203,7 +218,7 @@ main {
   flex-direction: column;
   gap: 1.25rem; /* between the groups */
   margin-top: auto;
-  padding-top: 8rem;
+  padding-top: 4rem;
 }
 
 /* Inset like the intro, so they line up. */
@@ -357,6 +372,11 @@ h1 {
 
 .error {
   margin-bottom: 2rem;
+}
+
+/* In place of the lists, for a period with no views. */
+.empty {
+  margin-top: 2rem;
 }
 
 /* The panel's two sections, the stats and lists at its top and the

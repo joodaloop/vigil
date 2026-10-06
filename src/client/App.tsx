@@ -166,8 +166,7 @@ export function App(props: { sites: Site[] }) {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   });
-  // Escape twice in quick succession focuses the sidebar's first host (that
-  // can be opened).
+  // Escape twice in quick succession focuses the sidebar's first host.
   let escapedAt = -Infinity;
   onShortcut((e) => {
     if (e.key !== "Escape" || e.repeat) return;
@@ -180,17 +179,22 @@ export function App(props: { sites: Site[] }) {
     }
   });
 
-  // Nothing is shown until both the sidebar and the panel have their first
-  // numbers, so they arrive together.
+  // Nothing but the intro, in the middle of the page, until both the
+  // sidebar and the panel have their first numbers, so they arrive together.
   return (
-    <Loading>
+    <Loading
+      fallback={
+        <div class="loading">
+          <div class="sidebar-top">
+            <Intro />
+          </div>
+        </div>
+      }
+    >
       <main>
         <nav class="sidebar">
           <div class="sidebar-top">
-            <p>
-              <strong>Vigil</strong> is an app for privacy-unfriendly analytics, designed by{" "}
-              <a href="https://joodaloop.com">Judah</a>.
-            </p>
+            <Intro />
             {/* The day hovered on the sidebar's charts, in its place while
                 there is one, with every host's views (or engaged views) and
                 new visitors that day added up. */}
@@ -228,7 +232,7 @@ export function App(props: { sites: Site[] }) {
                 }));
                 // Marked as soon as it's picked, ahead of its stats.
                 const open = () => latest(() => query().host) === h.host;
-                // Nothing in the period.
+                // Nothing in the period (it still opens, to say so).
                 const empty = () => !s()?.totals.views;
                 // The day's numbers while one's hovered, else the period's.
                 const count = (k: "views" | "reads" | "new") => {
@@ -237,25 +241,16 @@ export function App(props: { sites: Site[] }) {
                 };
                 return (
                   <div class="host-item">
-                    {/* Only the name opens it: a link, unless there's nothing to show. */}
-                    <Show
-                      when={!empty()}
-                      fallback={
-                        <span class="host-name" title={h.host}>
-                          {h.name}
-                        </span>
-                      }
+                    {/* Only the name opens it. */}
+                    <a
+                      class="host-name"
+                      href={hrefFor({ host: h.host })}
+                      aria-current={open() ? "page" : undefined}
+                      title={h.host}
+                      onClick={(e) => follow(e, { host: h.host })}
                     >
-                      <a
-                        class="host-name"
-                        href={hrefFor({ host: h.host })}
-                        aria-current={open() ? "page" : undefined}
-                        title={h.host}
-                        onClick={(e) => follow(e, { host: h.host })}
-                      >
-                        {h.name}
-                      </a>
-                    </Show>
+                      {h.name}
+                    </a>
                     <Show when={!empty()} fallback={<span class="muted">No stats yet</span>}>
                       <span class="host-nums">
                         <span class="host-counts">
@@ -594,45 +589,61 @@ function Stats(props: {
           />
         </div>
 
-        <div class="lists">
-          <Pages
-            items={shown().pages}
-            rows={props.rows.pages}
-            maxes={listMaxes()}
-            days={props.days}
-            engaged={props.engaged}
-            picked={props.filters.page}
-            href={(page) => props.filterHref({ page })}
-            onPick={(e, page) => props.onFollow(e, { page })}
-          />
-          <Referrers
-            items={shown().referrers}
-            maxes={listMaxes()}
-            rows={props.rows.referrers}
-            host={props.host}
-            icon={props.icon}
-            days={props.days}
-            engaged={props.engaged}
-            picked={props.filters.source}
-            href={(source) => props.filterHref({ source })}
-            onPick={(e, source) => props.onFollow(e, { source })}
-          />
-        </div>
+        {/* With nothing in the period at all (unfiltered), a line saying so
+            in place of the lists and the visitors. */}
+        <Show when={props.rows.pages > 0} fallback={<p class="muted empty">No views in this period.</p>}>
+          <div class="lists">
+            <Pages
+              items={shown().pages}
+              rows={props.rows.pages}
+              maxes={listMaxes()}
+              days={props.days}
+              engaged={props.engaged}
+              picked={props.filters.page}
+              href={(page) => props.filterHref({ page })}
+              onPick={(e, page) => props.onFollow(e, { page })}
+            />
+            <Referrers
+              items={shown().referrers}
+              maxes={listMaxes()}
+              rows={props.rows.referrers}
+              host={props.host}
+              icon={props.icon}
+              days={props.days}
+              engaged={props.engaged}
+              picked={props.filters.source}
+              href={(source) => props.filterHref({ source })}
+              onPick={(e, source) => props.onFollow(e, { source })}
+            />
+          </div>
+        </Show>
       </div>
 
-      <People
-        host={props.host}
-        stats={shown()}
-        days={props.days}
-        day={day()}
-        pinned={pinned()}
-        onHover={onHover}
-        onPin={setPinned}
-        picked={props.filters.country}
-        href={(country) => props.filterHref({ country })}
-        onPick={(e, country) => props.onFollow(e, { country })}
-      />
+      <Show when={props.rows.pages > 0}>
+        <People
+          host={props.host}
+          stats={shown()}
+          days={props.days}
+          day={day()}
+          pinned={pinned()}
+          onHover={onHover}
+          onPin={setPinned}
+          picked={props.filters.country}
+          href={(country) => props.filterHref({ country })}
+          onPick={(e, country) => props.onFollow(e, { country })}
+        />
+      </Show>
     </div>
+  );
+}
+
+// Who made Vigil: atop the sidebar, and alone while the page loads.
+function Intro() {
+  return (
+    <p>
+      <strong>Vigil</strong> is an app for privacy-unfriendly analytics, designed by{" "}
+      <a href="https://joodaloop.com">Judah</a>.
+    </p>
   );
 }
 

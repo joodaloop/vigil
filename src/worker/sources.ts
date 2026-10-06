@@ -1,8 +1,7 @@
-// What's read from pages, after hits that claim it (schema.sql): pages'
-// titles (`pages`), from the pages themselves; sites' favicons (`sources`),
-// from any of their pages; and for referring sites that aren't well-known
-// ones, their names and favicons, from their home pages. And the icons,
-// served from there.
+// What's read from pages, for what the dashboard shows (schema.sql): pages'
+// titles (`pages`), from the pages themselves; and sites' names and favicons
+// (`sources`), from their home pages, for referring sites that aren't
+// well-known ones and the site itself. And the icons, served from there.
 
 // A favicon this size or under is kept; a larger one, the dashboard gets
 // from DuckDuckGo instead.
@@ -12,50 +11,112 @@ const MAX_ICON = 30 * 1024;
 // or styles. Stop after this much HTML even if its closing tag never comes.
 const MAX_HTML = 128 * 1024;
 
-// How long a lookup lasts before the next hit looks again.
-const REFRESH = 30 * 86400;
+// How long a lookup lasts before the dashboard looks again.
+export const REFRESH = 30 * 86400;
 
-// Run in a hit's batch, with ?1 = the site's domain, or a referring one's.
-// Returns a row when this hit claims the domain's lookup: the domain's first
-// hit, or its first 30 days after the last claim. Every other hit writes
-// nothing.
-export const CLAIM_SOURCE = `INSERT INTO sources (domain, claimed_ts) VALUES (?1, unixepoch())
-    ON CONFLICT (domain) DO UPDATE SET claimed_ts = unixepoch() WHERE claimed_ts < unixepoch() - ${REFRESH}
+// The most requests one dashboard load's lookups make, redirects included:
+// under a Worker's 50 subrequests on the free plan. A page's lookup makes one
+// (the page), a site's two (its home page, then its icon), and each redirect
+// one more. The dashboard claims only as many lookups as fit without
+// redirects; those the redirects leave no room for are released, so a later
+// load takes them.
+export const FETCHES = 45;
+
+// The most lookups running at once. A Worker has 6 connections open at a
+// time and queues the rest, and a request's timeout runs while it's queued.
+const CONCURRENT = 5;
+
+// The most redirects a request follows.
+const MAX_REDIRECTS = 3;
+
+// Thrown by a request that FETCHES leaves no room for.
+class OutOfFetches extends Error {}
+type Budget = { left: number };
+
+// How long a claim holds before it's done: a load whose lookups are cut off
+// (its Worker stopped, or an error) leaves them to another after this.
+const LEASE = 5 * 60;
+
+// A claim's claimed_ts: as if done long enough ago that it's due again in
+// LEASE, so it lapses unless the lookup finishes and sets it to now.
+const LEASED = `unixepoch() - ${REFRESH - LEASE}`;
+
+// With ?1 = the site's domain, or a referring one's. Returns a row when this
+// claims the domain's lookup: there's none yet, the last was done over 30
+// days ago, or another load's claim has lapsed. Otherwise (another load
+// holds it, or did it) it writes nothing.
+export const CLAIM_SOURCE = `INSERT INTO sources (domain, claimed_ts) VALUES (?1, ${LEASED})
+    ON CONFLICT (domain) DO UPDATE SET claimed_ts = ${LEASED} WHERE claimed_ts < unixepoch() - ${REFRESH}
     RETURNING 1`;
 
-// Run in a hit's batch, with ?1 = the site's domain and ?2 = the page's
-// path. Returns a row when this hit claims the page's lookup, as for
-// CLAIM_SOURCE: the page's first hit, or its first 30 days after the last.
-export const CLAIM_PAGE = `INSERT INTO pages (host, path, claimed_ts) VALUES (?1, ?2, unixepoch())
-    ON CONFLICT (host, path) DO UPDATE SET claimed_ts = unixepoch() WHERE claimed_ts < unixepoch() - ${REFRESH}
+// With ?1 = the site's domain and ?2 = the page's path. Returns a row when
+// this claims the page's lookup, as for CLAIM_SOURCE.
+export const CLAIM_PAGE = `INSERT INTO pages (host, path, claimed_ts) VALUES (?1, ?2, ${LEASED})
+    ON CONFLICT (host, path) DO UPDATE SET claimed_ts = ${LEASED} WHERE claimed_ts < unixepoch() - ${REFRESH}
     RETURNING 1`;
 
-// Fetches a referring site's home page and keeps its name and favicon. A
-// page that can't be fetched (or read in full) leaves the row as it was,
-// until the next claim.
-export async function lookUpSource(env: Env, domain: string): Promise<void> {
-    const head = await readHead(`https://${domain}/`);
-    if (!head) return;
-    const name = nameFrom(head.siteName, head.title);
-    await saveSource(env, domain, name, await favicon(new URL(head.iconHref ?? "/favicon.ico", head.url)));
+// A lookup that's due for a site's dashboard: one of its pages (or a path
+// it was clicked through from), or a domain (a referring one's, or the
+// site's own, for its favicon beside clicks within it).
+export type Lookup = { path: string } | { domain: string };
+
+// Claims the lookups that are due (the caller keeps them within FETCHES) and
+// does the ones it wins, CONCURRENT at a time, in order. Run after a
+// dashboard load has answered: what's found shows on the next.
+export async function lookUpDue(env: Env, host: string, due: Lookup[], fetches = FETCHES): Promise<void> {
+    const claims = await env.DB.batch(
+        due.map((l) =>
+            "path" in l ? env.DB.prepare(CLAIM_PAGE).bind(host, l.path) : env.DB.prepare(CLAIM_SOURCE).bind(l.domain),
+        ),
+    );
+    const queue = due.filter((_, i) => claims[i].results.length > 0);
+    const budget: Budget = { left: fetches };
+    const setClaim = (l: Lookup, ts: string) =>
+        ("path" in l
+            ? env.DB.prepare(`UPDATE pages SET claimed_ts = ${ts} WHERE host = ?1 AND path = ?2`).bind(host, l.path)
+            : env.DB.prepare(`UPDATE sources SET claimed_ts = ${ts} WHERE domain = ?1`).bind(l.domain)
+        ).run();
+    const lookUp = async (l: Lookup) => {
+        try {
+            if ("path" in l) await lookUpPage(env, host, l.path, budget);
+            else await lookUpSource(env, l.domain, budget, l.domain === host);
+            // Done (a page that couldn't be fetched too): not again for 30 days.
+            await setClaim(l, "unixepoch()");
+        } catch (e) {
+            // Not done (and nothing saved): released now, for a later load,
+            // or for anything else, when the lease lapses.
+            if (e instanceof OutOfFetches) await setClaim(l, "0");
+            else console.error("lookup failed", l, e);
+        }
+    };
+    await Promise.all(
+        Array.from({ length: Math.min(CONCURRENT, queue.length) }, async () => {
+            for (let l = queue.shift(); l; l = queue.shift()) await lookUp(l);
+        }),
+    );
 }
 
-// Fetches a page of a site (a hit's, claimed) and keeps its title, and with
-// `withIcon` (the site's own lookup claimed too), the site's favicon: any of
-// its pages links it. Its name is only an og:site_name, as a page's title
-// isn't the site's (the dashboard shows the configured one anyway).
-export async function lookUpPage(env: Env, host: string, path: string, withIcon: boolean): Promise<void> {
+// Fetches a site's home page and keeps its name and favicon: a referring
+// site's, or with `own`, the dashboard's own, whose name is only an
+// og:site_name, as its home page's title may not be the site's (the
+// dashboard shows the configured one anyway). A page that can't be fetched
+// (or read in full) leaves the row as it was, until the next claim.
+export async function lookUpSource(env: Env, domain: string, budget?: Budget, own = false): Promise<void> {
+    const head = await readHead(`https://${domain}/`, budget);
+    if (!head) return;
+    const name = own ? nameFrom(head.siteName, "") : nameFrom(head.siteName, head.title);
+    await saveSource(env, domain, name, await favicon(new URL(head.iconHref ?? "/favicon.ico", head.url), budget));
+}
+
+// Fetches a page of a site (claimed) and keeps its title.
+export async function lookUpPage(env: Env, host: string, path: string, budget?: Budget): Promise<void> {
     // Joined, not resolved, so a path like "//elsewhere/x" stays on the site.
-    const head = await readHead(`https://${host}${path}`);
+    const head = await readHead(`https://${host}${path}`, budget);
     if (!head) return;
     // The first of them with any text (a blank og:title doesn't hide a title).
     const clean = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 200);
     const title = clean(head.pageTitle) || clean(head.title) || null;
     await env.DB.prepare(`UPDATE pages SET title = ?3 WHERE host = ?1 AND path = ?2`).bind(host, path, title).run();
-    if (withIcon) {
-        const name = head.siteName.replace(/\s+/g, " ").trim().slice(0, 100) || null;
-        await saveSource(env, host, name, await favicon(new URL(head.iconHref ?? "/favicon.ico", head.url)));
-    }
 }
 
 // Keeps a site's name (null: no new one, so the old one stays) and favicon
@@ -86,11 +147,12 @@ async function saveSource(
 // (decoded), and its address after any redirects. Null when it can't be
 // fetched, isn't HTML, or its head isn't over within MAX_HTML (a partial
 // head can't establish that something's absent).
-async function readHead(url: string | URL) {
+async function readHead(url: string | URL, budget?: Budget) {
     let page: Response;
     try {
-        page = await get(url);
-    } catch {
+        page = await get(url, budget);
+    } catch (e) {
+        if (e instanceof OutOfFetches) throw e;
         return null;
     }
     if (!page.ok || !page.body || !page.headers.get("Content-Type")?.includes("text/html")) return null;
@@ -210,11 +272,21 @@ function iconResponse(body: BodyInit, type: string, cache: string) {
     });
 }
 
-function get(url: string | URL) {
-    return fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; Vigil; +https://github.com/joodaloop/vigil)" },
-        signal: AbortSignal.timeout(5000),
-    });
+// A GET, following up to MAX_REDIRECTS redirects itself so that each counts
+// against `budget`, if given. After that many, the redirect is the response.
+async function get(url: string | URL, budget?: Budget): Promise<Response> {
+    for (let redirects = 0; ; redirects++) {
+        if (budget && budget.left-- <= 0) throw new OutOfFetches();
+        const r = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0 (compatible; Vigil; +https://github.com/joodaloop/vigil)" },
+            redirect: "manual",
+            signal: AbortSignal.timeout(5000),
+        });
+        const location = r.headers.get("Location");
+        if (r.status < 300 || r.status >= 400 || !location || redirects === MAX_REDIRECTS) return r;
+        await r.body?.cancel();
+        url = new URL(location, url);
+    }
 }
 
 // A site's name: its og:site_name, or the first part of its title ("Some
@@ -226,16 +298,17 @@ function nameFrom(siteName: string, title: string): string | null {
 
 // The icon at `url`, if it's an image of at most MAX_ICON bytes; null when
 // missing or unusable, undefined when a failed request leaves it unknown.
-async function favicon(url: URL): Promise<{ data: Uint8Array; type: string } | null | undefined> {
+async function favicon(url: URL, budget?: Budget): Promise<{ data: Uint8Array; type: string } | null | undefined> {
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
     try {
-        const r = await get(url);
+        const r = await get(url, budget);
         if (!r.ok) return r.status === 404 || r.status === 410 ? null : undefined;
         const type = r.headers.get("Content-Type")?.split(";")[0].trim() ?? "";
         if (!r.body || !type.startsWith("image/")) return null;
         const data = await readAtMost(r.body, MAX_ICON);
         return data && data.length > 0 ? { data, type } : null;
-    } catch {
+    } catch (e) {
+        if (e instanceof OutOfFetches) throw e;
         return undefined;
     }
 }
