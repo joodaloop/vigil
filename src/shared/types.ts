@@ -8,6 +8,8 @@ export type HostTotals = {
     // Visitors per operating system, of the five shown, and how many have a
     // known one at all (visitors from before it was recorded don't).
     systems: { windows: number; mac: number; ios: number; android: number; linux: number; known: number };
+    // Visitors per browser engine, and how many have a known browser at all.
+    engines: { blink: number; webkit: number; gecko: number; known: number };
     countries: { code: string; visitors: number }[]; // ISO codes, most visitors first; unknown left out
     new: number; // visitors whose first ever hit on this host is in the period
     newBounced: number; // ...of those, ones with no other hit on this host, ever

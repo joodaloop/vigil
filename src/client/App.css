@@ -19,6 +19,16 @@
   letter-spacing: -0.02em;
 }
 
+/* No double-tap zoom: a double or triple tap switches what's shown (see
+   App.tsx). Light only, so form controls and scrollbars are too; and no
+   text enlarged when a phone turns sideways. */
+html {
+  touch-action: manipulation;
+  color-scheme: light;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -28,13 +38,33 @@ body {
     -apple-system,
     "Segoe UI",
     sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  text-underline-position: from-font;
+  color: inherit;
 }
 
 p {
   margin: 0;
 }
 
-/* Every button here is drawn by its own styles. */
+/* Every button here is drawn by its own styles, and so are the links that
+   work as controls (the hosts, the lists' rows, the flags): no grey flash on
+   a tap (each marks what it does itself), and no text selected by a long
+   press. */
+button,
+a.host-name,
+a.row,
+.countries a {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  color: inherit;
+  text-decoration: none;
+}
+
 button {
   padding: 0;
   font: inherit;
@@ -50,13 +80,23 @@ button:disabled {
   cursor: default;
 }
 
-/* The one focus style. On its edge by default: flags and page numbers have
+/* The one focus style. On its edge by default: flags and page buttons have
    padding to spare, and rows touch, so one any further out would cover its
    neighbours'. (The period's select has it too; see below.) */
 button:focus-visible,
 a:focus-visible {
   outline: 1px solid var(--text);
   outline-offset: 0;
+}
+
+/* Read by screen readers, not shown. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .muted {
@@ -229,17 +269,19 @@ h1 {
 .host-name {
   align-self: flex-start;
   max-width: calc(100% + 12px);
-  padding: 0 6px 2px;
-  margin: 0 -6px -2px;
+  padding: 0 6px 1px;
+  margin: 0 -6px -1px;
   font-size: 1.15rem;
   font-weight: 600;
 }
 
-.host-name:not(:disabled, [aria-pressed="true"]):hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+@media (hover: hover) {
+  a.host-name:not([aria-current]):hover {
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+  }
 }
 
-.host-name[aria-pressed="true"] {
+.host-name[aria-current="page"] {
   color: var(--bg);
   background: var(--text);
 }
@@ -296,6 +338,8 @@ h1 {
 
 .panel {
   --pad: 2.5rem; /* side padding, which the big chart bleeds through */
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   padding: 1.5rem var(--pad) 0;
   background: var(--surface);
@@ -313,6 +357,15 @@ h1 {
 
 .error {
   margin-bottom: 2rem;
+}
+
+/* The panel's two sections, the stats and lists at its top and the
+   visitors at its foot, with any space left over between them. */
+.stats {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .stats-main {
@@ -378,18 +431,39 @@ h1 {
   text-wrap: balance;
 }
 
-.countries button {
+.countries a {
   display: inline-block;
   padding: 0.2rem;
   vertical-align: bottom;
 }
 
-.countries button:hover {
-  opacity: 0.65;
+/* The flag filtered by, on the page's background, as a row is, and under a
+   see-through wash of the text's colour (inset by the link's padding, so
+   over the flag alone). */
+.countries a[aria-current] {
+  position: relative;
+  background: var(--bg);
 }
 
+.countries a[aria-current]::after {
+  content: "";
+  position: absolute;
+  inset: 0.2rem;
+  background: color-mix(in srgb, var(--text) 25%, transparent);
+}
+
+@media (hover: hover) {
+  .countries a:hover {
+    opacity: 0.65;
+  }
+}
+
+/* Flags are all 4:3 (flag-icons' 4x3 set), so each takes its width from
+   its height before it loads. */
 .countries img {
   display: block;
+  width: auto;
+  aspect-ratio: 4 / 3;
 }
 
 .host-title {
@@ -423,8 +497,8 @@ h1 {
 .host-dates {
   position: relative;
   min-width: 0;
-  padding: 0 6px 2px;
-  margin: 0 0 -2px -6px;
+  padding: 0 6px 1px;
+  margin: 0 0 -1px -6px;
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
@@ -440,6 +514,7 @@ h1 {
 
 select option {
   background: var(--bg);
+  color: var(--text);
 }
 
 .totals {
@@ -463,8 +538,8 @@ select option {
    in the page's background colour on that blue. Pulled out by
    its padding so the text stays in line. */
 .engaged-toggle {
-  padding: 0 6px 2px;
-  margin: 0 -6px -2px; /* its padding taken back, so nothing moves */
+  padding: 0 6px 1px;
+  margin: 0 -6px -1px; /* its padding taken back, so nothing moves */
   background: color-mix(in srgb, var(--views) 15%, transparent);
 }
 
@@ -603,7 +678,7 @@ select option {
 }
 
 /* A page or referrer: its name, a sparkline of its views, then its views
-   and new visitors, over a bar of its share (see below). A button that
+   and new visitors, over a bar of its share (see below). A link that
    filters by it. It has side padding, for room around its focus outline,
    and is pulled out by it so its text stays in line with the rest of the
    panel. */
@@ -654,13 +729,25 @@ select option {
 }
 
 /* A hovered row on the page's background, out of the panel's. */
-.row:hover {
+@media (hover: hover) {
+  .row:hover {
+    background: var(--bg);
+  }
+}
+
+/* The focused row over its neighbours, so a hovered one's background
+   doesn't cover the edge of its outline. */
+.row:focus-visible {
+  z-index: 1;
+}
+
+/* The row filtered by: on the page's background, as while hovered, and no
+   bar, which would only show it's all of what's left. */
+.row[aria-current] {
   background: var(--bg);
 }
 
-/* The row filtered by: no bar, which would only show it's all of what's
-   left. */
-.row[aria-pressed="true"]::before {
+.row[aria-current]::before {
   content: none;
 }
 
@@ -727,37 +814,57 @@ select option {
   width: var(--spark);
 }
 
-/* Page buttons: one per page, to the right, each labelled with the key that
-   picks it, the current one bold in the text's colour; hovering another
-   tints it. */
+/* Page buttons: one per page, to the right, each a small square outline,
+   the current one filled; hovering another puts a small square in its
+   middle. Laid out as a line of text, so the rows they wrap onto are
+   balanced. */
 .pager {
-  --slot: 18px; /* each button */
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  --slot: 14px; /* each button */
+  --square: 8px; /* what it shows */
+  text-align: right;
+  text-wrap: balance;
+  line-height: var(--slot);
   min-height: var(--slot); /* one row of buttons, kept even when there are none */
   width: fit-content; /* as wide as its buttons, so its focus outline is too */
   margin-top: 1rem;
   margin-left: auto; /* on the right */
-  /* The last key's right edge in line with the rows' (a key being about
-     1ch wide, centred in its button). */
-  margin-right: calc((1ch - var(--slot)) / 2);
-  font-size: 0.75rem;
+  /* The last square's right edge in line with the rows'. */
+  margin-right: calc((var(--square) - var(--slot)) / 2);
 }
 
 .pager button {
-  display: flex;
+  display: inline-flex;
+  vertical-align: top;
   align-items: center;
   justify-content: center;
   width: var(--slot);
   height: var(--slot);
-  line-height: 1;
   color: var(--muted);
 }
 
+.pager button::before {
+  content: "";
+  width: var(--square);
+  height: var(--square);
+  border: 1px solid currentColor;
+}
+
+@media (hover: hover) {
+  .pager button:not(.current):hover {
+    color: var(--text);
+  }
+
+  .pager button:not(.current):hover::before {
+    background: linear-gradient(currentColor, currentColor) center / 4px 4px no-repeat;
+  }
+}
+
 .pager button.current {
-  font-weight: 700;
   color: var(--text);
+}
+
+.pager button.current::before {
+  background: var(--text);
 }
 
 /* No focus outline on a button: focus is always on the current page, already
@@ -769,11 +876,6 @@ select option {
 .pager:has(:focus-visible) {
   outline: 1px solid var(--text);
   outline-offset: 0;
-}
-
-.pager button:not(.current):hover {
-  background: var(--surface);
-  color: var(--text);
 }
 
 /* ---- Narrower screens ---- */
@@ -856,11 +958,10 @@ select option {
   }
 }
 
-/* Without a fine pointer (a mouse or trackpad), page buttons big enough to
-   tap. */
-@media not all and (pointer: fine) {
+/* With a finger as the pointer, page buttons big enough to tap. */
+@media (pointer: coarse) {
   .pager {
     --slot: 28px;
-    font-size: 0.9375rem;
+    --square: 12px;
   }
 }

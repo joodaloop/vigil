@@ -10,21 +10,23 @@ const GROUPS: Shortcut[][] = [
   [
     [["[", "]"], "Switch months"],
     [["\\"], 'Back to "Last 30 days"'],
-    [["←", "→"], "Move the pinned day around"],
+    [["-", "="], "Move the pinned day around"],
     [["Esc"], "Unpin the pinned day"],
     [["Backspace"], "Clear all filters"],
   ],
   [
-    [["1–0"], "Paginate pages list"],
-    [["q–p", "a–l"], "Paginate referrer list"],
+    [["1"], "Focus pages list"],
+    [["2"], "Focus referrers list"],
+    [["3"], "Focus countries list"],
     [["↑", "↓"], "Move through a list"],
+    [["←", "→"], "Paginate a list"],
     [["Esc Esc"], "Focus first site in sidebar"],
   ],
   [
-    [["/"], "Show engaged views"],
-    [["."], "Show percentages"],
-    [[","], "Show raw paths"],
-    [["⌘/"], "Hide this list of shortcuts"],
+    [["/"], "Toggle engaged views"],
+    [["."], "Toggle percentages"],
+    [[","], "Toggle raw paths"],
+    [["⌘/"], "Toggle list of shortcuts"],
   ],
 ];
 

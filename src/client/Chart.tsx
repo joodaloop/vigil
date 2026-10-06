@@ -64,7 +64,8 @@ const chartPadding = (lineWidth: number) => Math.ceil(lineWidth);
 //
 // With `onPin` too, clicking a day reports it (unix seconds) to be pinned,
 // or null if it's `pinned` already. The pin itself is kept by the caller,
-// so several charts can share it.
+// so several charts can share it. Touch and pen don't hover: a tap pins (or
+// unpins) as a click does, and dragging sideways pins each day passed over.
 //
 // The chart marks `pinned` (if it has that day) with dots on the lines and a
 // line down through it, or else `marked` (an index, e.g. the day hovered
@@ -152,6 +153,7 @@ export function Chart(props: {
     }
 
     function onMove(e: PointerEvent) {
+        if (e.pointerType !== "mouse") return onDrag(e);
         if (!plot || !props.onHover || props.days.length === 0) return;
         if (e.pointerType === "mouse" && (props.hoverDelay ?? 0) > 0 && !hoverReady) {
             // Each move starts the wait over.
@@ -179,39 +181,55 @@ export function Chart(props: {
     }
 
     // Pins the day at clientX (moving the pin there if another is pinned),
-    // or if it's the pinned one, unpins it, leaving it hovered. The day is
-    // the click's or tap's own, not the hovered one.
-    function pin(clientX: number) {
+    // or if it's the pinned one, unpins it, leaving it hovered by a mouse
+    // (a tap leaves nothing hovered). The day is the click's or tap's own,
+    // not the hovered one.
+    function pin(clientX: number, mouse = true) {
         if (!plot || !props.onPin || props.days.length === 0) return;
         resetHoverDelay();
         hoverReady = true;
         const i = dayAt(plot, { clientX });
-        hover(i);
+        hover(mouse ? i : null);
         props.onPin(pinned() === i ? null : props.days[i]);
     }
 
     // Touch and pen pin on lifting rather than on the click after: iOS
     // Safari drops a tap's click when the tap changes what's shown (as
-    // marking its day does). A drag isn't a tap, and pins nothing.
+    // marking its day does). Once a finger has moved sideways, it's a drag
+    // rather than a tap, pinning the day under it as it goes, and lifting it
+    // leaves that day pinned. Whether a tap unpins is from the pin before
+    // the finger came down.
     let tapX: number | null = null;
+    let dragging = false;
     let tappedAt = -Infinity;
 
     function onDown(e: PointerEvent) {
-        tapX = e.pointerType === "mouse" ? null : e.clientX;
-        onMove(e);
+        if (e.pointerType === "mouse") return onMove(e);
+        tapX = e.clientX;
+        dragging = false;
+    }
+
+    function onDrag(e: PointerEvent) {
+        if (tapX === null || !plot || !props.onPin || props.days.length === 0) return;
+        dragging ||= Math.abs(e.clientX - tapX) >= 10;
+        if (!dragging) return;
+        const day = props.days[dayAt(plot, e)];
+        if (day !== props.pinned) props.onPin(day);
     }
 
     function onUp(e: PointerEvent) {
         if (tapX === null) return;
-        const tap = Math.abs(e.clientX - tapX) < 10;
+        const tap = !dragging;
         tapX = null;
+        dragging = false;
         if (!tap) return;
         tappedAt = performance.now();
-        pin(e.clientX);
+        pin(e.clientX, false);
     }
 
     function onCancel() {
         tapX = null;
+        dragging = false;
         onLeave();
     }
 
@@ -309,8 +327,8 @@ export function Chart(props: {
             // At least the plot's height (before it's drawn too), or taller
             // if the page's styles lay the plot out in a line of text.
             style={{ "min-height": `${height()}px` }}
-            // Touch: a finger down shows its day, dragging sideways moves
-            // through days, lifting it (or a scroll taking over) clears it.
+            // Touch: a tap pins its day, dragging sideways moves the pin
+            // through days (a vertical drag scrolls instead).
             onPointerEnter={onMove}
             onPointerDown={onDown}
             onPointerMove={onMove}

@@ -24,7 +24,14 @@ import { configuredSites } from "./sites";
 type DailyRow = { day: number; views: number; visitors: number; new: number; reads: number };
 type PageDayRow = { page: string; day: number; views: number; new: number; reads: number };
 type SourceDayRow = { source: string; day: number; views: number; new: number; reads: number };
-type PeopleRow = { device: string | null; country: string | null; os: string | null; visitors: number; bounced: number };
+type PeopleRow = {
+    device: string | null;
+    country: string | null;
+    os: string | null;
+    browser: string | null;
+    visitors: number;
+    bounced: number;
+};
 type SourceInfoRow = { domain: string; name: string | null; icon: number | null };
 type PageTitleRow = { path: string; title: string };
 type HostDailyRow = { host: string; day: number; views: number; new: number; reads: number };
@@ -45,6 +52,7 @@ function emptyHost(n: number): HostStats<Sparse> {
             visitors: 0,
             devices: { desktop: 0, tablet: 0, mobile: 0 },
             systems: { windows: 0, mac: 0, ios: 0, android: 0, linux: 0, known: 0 },
+            engines: { blink: 0, webkit: 0, gecko: 0, known: 0 },
             countries: [],
             new: 0,
             newBounced: 0,
@@ -97,14 +105,14 @@ async function overview(env: Env, host: string, numDays: number, ago: number, fi
                   `SELECT source, day, SUM(views) AS views, SUM(new) AS new, SUM(reads) AS reads
                    FROM views WHERE $WHERE AND source != '' GROUP BY source, day`,
               ),
-        // Visitors in the period, by device, country and OS. Unfiltered and
+        // Visitors in the period, by device, country, OS and browser. Unfiltered and
         // ending today: everyone whose latest visit is in it, read from the
         // covering index; otherwise, from the period's (and filter's) hits.
         byFilter
             ? env.DB.prepare(byFilter.people).bind(...byFilter.params)
             : env.DB.prepare(
-                  `SELECT device, country, os, COUNT(*) AS visitors, SUM(first_ts >= ?2 AND first_ts = last_ts) AS bounced
-                   FROM visitors WHERE host = ?1 AND last_ts >= ?2 GROUP BY device, country, os`,
+                  `SELECT device, country, os, browser, COUNT(*) AS visitors, SUM(first_ts >= ?2 AND first_ts = last_ts) AS bounced
+                   FROM visitors WHERE host = ?1 AND last_ts >= ?2 GROUP BY device, country, os, browser`,
               ).bind(host, firstDay * 86400),
         // From hits, visitors per day; otherwise they're summed from `views`.
         byFilter ? env.DB.prepare(byFilter.daily).bind(...byFilter.params) : null,
@@ -202,6 +210,9 @@ async function overview(env: Env, host: string, numDays: number, ago: number, fi
         const os = OS[r.os ?? ""];
         if (os) t.systems[os] += r.visitors;
         if (r.os) t.systems.known += r.visitors;
+        const engine = engineOf(r.browser, r.os);
+        if (engine) t.engines[engine] += r.visitors;
+        if (r.browser) t.engines.known += r.visitors;
     }
     const countries = new Map<string, number>();
     for (const r of everyone.results) {
@@ -232,6 +243,18 @@ const OS: Record<string, "windows" | "mac" | "ios" | "android" | "linux"> = {
     Manjaro: "linux",
     "elementary OS": "linux",
 };
+
+// A browser's engine, by the browser and OS names ua-parser-js gives: every
+// browser on iOS is WebKit underneath; elsewhere, Safari is WebKit, Firefox
+// and its forks are Gecko, and Chrome and the browsers built on Chromium
+// (Edge, Opera, Samsung Internet, Brave, ...) are Blink. Null for others.
+function engineOf(browser: string | null, os: string | null): "blink" | "webkit" | "gecko" | null {
+    if (!browser) return null;
+    if (os === "iOS" || /safari/i.test(browser)) return "webkit";
+    if (/firefox|waterfox|librewolf|icecat|seamonkey|pale moon/i.test(browser)) return "gecko";
+    if (/chrom|edge|opera|samsung|brave|vivaldi|yandex|whale|silk|arc/i.test(browser)) return "blink";
+    return null;
+}
 
 async function hostSummaries(env: Env, hosts: string[], numDays: number, ago: number): Promise<HostSummaries> {
     const { firstDay, lastDay, days } = period(numDays, ago);

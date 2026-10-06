@@ -5,10 +5,10 @@ import { referrerIcon, referrerName } from "../shared/referrers";
 import { Chart, filled, type Line } from "./Chart";
 import { num, pct, share } from "./format";
 import { SourceIcon } from "./icons";
-import { onShortcut } from "./keys";
+import { arrowStep, createRoving, focusAt, indexIn, plainClick } from "./keys";
 import { theme } from "./theme";
 
-// Pages by views; picking one filters by it. The number keys pick its pages.
+// Pages by views; picking one filters by it.
 export function Pages(props: {
   items: PageRow[];
   rows: number; // the list's rows unfiltered, for its height
@@ -16,13 +16,13 @@ export function Pages(props: {
   days: number[];
   engaged: boolean;
   picked: string | null;
-  onPick: (path: string | null) => void;
+  href: (path: string | null) => string;
+  onPick: (e: MouseEvent, path: string | null) => void;
 }) {
   return (
     <List
       class="pages"
       maxes={props.maxes}
-      pageKeys={[..."1234567890"]}
       items={props.items}
       rows={props.rows}
       key={(p) => p.path}
@@ -30,6 +30,7 @@ export function Pages(props: {
       days={props.days}
       engaged={props.engaged}
       picked={props.picked}
+      href={props.href}
       onPick={props.onPick}
       label={(p) => {
         // "/posts/x/" shows as "/posts/x"; the home page stays "/".
@@ -49,8 +50,7 @@ export function Pages(props: {
 }
 
 // Referrers by new visitors, then views; picking one filters by it. Each
-// shows its address in place of its name after ",". The keys q to p pick
-// its pages.
+// shows its address in place of its name after ",".
 export function Referrers(props: {
   items: Referrer[];
   rows: number; // the list's rows unfiltered, for its height
@@ -60,13 +60,13 @@ export function Referrers(props: {
   days: number[];
   engaged: boolean;
   picked: string | null;
-  onPick: (source: string | null) => void;
+  href: (source: string | null) => string;
+  onPick: (e: MouseEvent, source: string | null) => void;
 }) {
   return (
     <List
       class="referrers"
       maxes={props.maxes}
-      pageKeys={[..."qwertyuiopasdfghjkl"]}
       byNew
       items={props.items}
       rows={props.rows}
@@ -75,6 +75,7 @@ export function Referrers(props: {
       days={props.days}
       engaged={props.engaged}
       picked={props.picked}
+      href={props.href}
       onPick={props.onPick}
       label={(r) => (
         <span class="source-name">
@@ -96,8 +97,8 @@ export function Referrers(props: {
 // as long as its share of the list's views, or with `byNew`, of its new
 // visitors. In engaged mode (`engaged`), engaged views stand in for views,
 // in bold, their sparklines show them filled solid under the views, and the bars are their shares
-// (`byNew` too, as the rows are then ranked by them). Each row is a button that filters by it (`onPick` with its
-// key), or if it's the one `picked`, clears that filter. The picked row is
+// (`byNew` too, as the rows are then ranked by them). Each row is a link that filters by it (`href` and
+// `onPick` with its key), or if it's the one `picked`, clears that filter. The picked row is
 // always there to clear it: one with no views (`blank`) if it's not in
 // `items` (nothing in the period). Filtered down to it, it stays where it
 // was on its page when it was clicked, rather than moving up to the top.
@@ -109,12 +110,12 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
   key: (item: T) => string;
   blank: (key: string) => T;
   byNew?: boolean;
-  pageKeys?: string[];
   label: (item: T) => JSX.Element;
   days: number[];
   engaged: boolean;
   picked: string | null;
-  onPick: (key: string | null) => void;
+  href: (key: string | null) => string;
+  onPick: (e: MouseEvent, key: string | null) => void;
 }) {
   // Where the row clicked to filter by sat on its page, and while the list
   // is filtered down to it, the rows to leave empty above it.
@@ -135,8 +136,8 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
   const newTotal = createMemo(() => items().reduce((n, x) => n + x.new, 0));
   return (
     <div class={props.class}>
-      <Paged items={items()} key={props.key} offset={offset()} minRows={props.rows} pageKeys={props.pageKeys}>
-        {(x) => {
+      <Paged items={items()} key={props.key} offset={offset()} minRows={props.rows}>
+        {(x, tabindex) => {
           // The row's sparkline, only new when its series are (not when a
           // day is hovered, which leaves them be) or engaged mode changes; a
           // new one redraws it.
@@ -144,15 +145,17 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
           const readSeries = createMemo(() => (props.engaged ? x().dailyReads : null));
           const lines = createMemo(() => sparkline(viewSeries(), readSeries()));
           return (
-            <button
+            <a
               class={["row", { "by-new": byNew() }]}
-              aria-pressed={props.key(x()) === props.picked ? "true" : "false"}
+              href={props.href(props.key(x()) === props.picked ? null : props.key(x()))}
+              aria-current={props.key(x()) === props.picked ? "true" : undefined}
+              tabindex={tabindex()}
               onClick={(e) => {
                 const key = props.key(x());
-                if (key === props.picked) return props.onPick(null);
+                if (key === props.picked) return props.onPick(e, null);
                 const row = e.currentTarget;
-                setClicked({ key, slot: [...row.parentElement!.children].indexOf(row) });
-                props.onPick(key);
+                if (plainClick(e)) setClicked({ key, slot: [...row.parentElement!.children].indexOf(row) });
+                props.onPick(e, key);
               }}
               style={{
                 "--share": byNew()
@@ -176,7 +179,7 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
               <span class="num" style={{ color: theme.stats.new }}>
                 <Count n={x().new} total={newTotal()} blankZero />
               </span>
-            </button>
+            </a>
           );
         }}
       </Paged>
@@ -221,27 +224,26 @@ const noViews = (days: number[]) => ({
   dailyReads: days.map(() => 0),
 });
 
-// Shows `items` 10 at a time, with a row of page buttons when there are
-// more, each labelled with its key from `pageKeys` (or its number).
+// Shows `items` 10 at a time, with a row of page buttons (squares) when
+// there are more.
 // The list keeps a full page's height (or `minRows`' height, if fewer), dots
 // included, however few items there are. Rows are matched by `key`, so one stays the same element as its
-// data changes. Whenever the rows come in another order (a day hovered,
-// another site or period), it's back to the first page. `offset` leaves that
-// many empty rows above the first.
-// From a row, the up and down arrows move to the row above and below, on
-// through to the pages before and after. The page buttons are one tab stop,
-// the current page's: the up and down arrows move between pages from there
-// (left and right are the main chart's). Anywhere on the page but a text
-// field, the nth of `pageKeys` picks the nth page, if there is one ("" for
-// none), and focuses its first row.
+// data changes. Whenever the rows come in another order (a day hovered or
+// pinned, another site or period), it's back to the first page. `offset`
+// leaves that many empty rows above the first.
+// The rows are one tab stop, and so are the page buttons (see createRoving):
+// each child is given its tabindex. From a row, the up and down arrows move
+// to the row above and below, on through to the pages before and after, and
+// the left and right arrows to the page before and after, onto the row in
+// the same place (or its last). From the page buttons, the left and right
+// arrows move between pages.
 function Paged<T>(props: {
   items: T[];
   size?: number;
   key: (item: T) => string;
   offset?: number; // empty rows above the first
   minRows?: number; // the fewest rows' height it takes, up to a page (all of one, by default)
-  pageKeys?: string[];
-  children: (item: () => T) => JSX.Element;
+  children: (item: () => T, tabindex: () => number) => JSX.Element;
 }) {
   const size = () => props.size ?? 10;
   const pages = () => Math.max(1, Math.ceil(props.items.length / size()));
@@ -251,47 +253,58 @@ function Paged<T>(props: {
   const current = () => (picked().order === order() ? picked().page : 0);
   const setPage = (page: number) => setPicked({ order: order(), page });
   const start = () => current() * size();
+  const shown = createMemo(() => props.items.slice(start(), start() + size()));
+  const roving = createRoving();
   let rows!: HTMLDivElement;
+
+  // Shows `page`, and focuses its row at `slot` (or its last).
+  const turnTo = (page: number, slot: number) => {
+    setPage(page);
+    flush(); // so the page's rows are there to focus
+    focusAt(rows, slot);
+  };
+
   const onRowKey = (e: KeyboardEvent) => {
-    const by = { ArrowUp: -1, ArrowDown: 1 }[e.key];
-    if (by === undefined || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-    const shown = [...rows.children] as HTMLElement[];
-    const at = shown.indexOf((e.target as Element).closest(".paged > *") as HTMLElement);
+    const at = indexIn(rows, e.target as Node);
     if (at < 0) return;
+    const turn = arrowStep(e, "x");
+    if (turn !== null) {
+      e.preventDefault();
+      const page = current() + turn;
+      if (page >= 0 && page < pages()) turnTo(page, at);
+      return;
+    }
+    const by = arrowStep(e, "y");
+    if (by === null) return;
     e.preventDefault(); // or the arrows would scroll the page
-    const to = at + by;
-    if (to >= 0 && to < shown.length) return shown[to].focus();
+    if (at + by >= 0 && at + by < rows.children.length) return focusAt(rows, at + by);
     // Past the page's first or last row: the next page's first, or the
     // previous page's last.
     const page = current() + by;
-    if (page < 0 || page >= pages()) return;
-    setPage(page);
-    flush(); // so the page's rows are there to focus
-    const next = (by > 0 ? rows.firstElementChild : rows.lastElementChild) as HTMLElement | null;
-    next?.focus();
+    if (page >= 0 && page < pages()) turnTo(page, by > 0 ? 0 : size() - 1);
   };
+
   const onPagerKey = (e: KeyboardEvent & { currentTarget: HTMLElement }) => {
-    const by = { ArrowUp: -1, ArrowDown: 1 }[e.key];
-    if (by === undefined || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-    e.preventDefault(); // or the arrows would scroll the page
-    const next = Math.max(0, Math.min(current() + by, pages() - 1));
-    setPage(next);
-    (e.currentTarget.children[next] as HTMLElement | undefined)?.focus();
-  };
-  onShortcut((e) => {
-    if (e.shiftKey || e.repeat || !props.pageKeys) return;
-    const page = props.pageKeys.indexOf(e.key);
-    if (page < 0 || page >= pages()) return;
+    const by = arrowStep(e, "x");
+    if (by === null) return;
+    e.preventDefault();
+    const page = Math.max(0, Math.min(current() + by, pages() - 1));
     setPage(page);
-    flush(); // so the page's rows are there to focus
-    (rows.firstElementChild as HTMLElement | null)?.focus();
-  });
+    flush(); // so it's the tab stop before it's focused
+    focusAt(e.currentTarget, page);
+  };
 
   return (
     <>
-      <div ref={rows} class="paged" onKeyDown={onRowKey} style={{ "--rows": Math.min(size(), props.minRows ?? size()), "--offset": props.offset ?? 0 }}>
-        <For each={props.items.slice(start(), start() + size())} keyed={props.key}>
-          {(item) => props.children(item)}
+      <div
+        ref={rows}
+        class="paged"
+        onKeyDown={onRowKey}
+        onFocusIn={roving.onFocusIn}
+        style={{ "--rows": Math.min(size(), props.minRows ?? size()), "--offset": props.offset ?? 0 }}
+      >
+        <For each={shown()} keyed={props.key}>
+          {(item, i) => props.children(item, () => roving.tabindex(i(), shown().length))}
         </For>
       </div>
       <div class="pager" onKeyDown={onPagerKey}>
@@ -304,9 +317,7 @@ function Paged<T>(props: {
                 aria-current={i === current() ? "page" : undefined}
                 tabindex={i === current() ? 0 : -1}
                 onClick={() => setPage(i)}
-              >
-                {props.pageKeys?.[i] ?? i + 1}
-              </button>
+              />
             )}
           </For>
         </Show>

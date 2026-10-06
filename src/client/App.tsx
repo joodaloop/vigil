@@ -18,7 +18,7 @@ import { DEFAULT_PERIOD } from "./config";
 import { fullDate, num, pct } from "./format";
 import { Pages, Referrers, sparkline, viewLines } from "./lists";
 import { People } from "./people";
-import { onShortcut } from "./keys";
+import { onShortcut, onTaps, plainClick } from "./keys";
 import { Shortcuts } from "./shortcuts";
 import { storedFlag } from "./stored";
 import { theme } from "./theme";
@@ -141,14 +141,25 @@ export function App(props: { sites: Site[] }) {
   const updating = () => isPending(() => view());
 
   // From the query as last set, which a read of `query()` doesn't give until
-  // the next flush, so two changes in a row both count. Each is a step back.
+  // the next flush, so two changes in a row both count. Each is a step back,
+  // unless it changes nothing.
   function update(change: Partial<Query>) {
     setQuery((q) => {
       const next = { ...q, ...change };
-      history.pushState(null, "", `?${toParams(next)}`);
+      const address = `?${toParams(next)}`;
+      if (address === `?${toParams(q)}`) return q;
+      history.pushState(null, "", address);
       return next;
     });
   }
+  // The address `change` goes to, for a link that makes it; the link's plain
+  // clicks make it in the page (`follow`), others are left to the browser.
+  const hrefFor = (change: Partial<Query>) => `?${toParams({ ...query(), ...change })}`;
+  const follow = (e: MouseEvent, change: Partial<Query>) => {
+    if (!plainClick(e)) return;
+    e.preventDefault();
+    update(change);
+  };
   // Back and forward show the query in the address they land on.
   onSettled(() => {
     const onPop = () => setQuery(initialQuery(HOSTS));
@@ -159,11 +170,11 @@ export function App(props: { sites: Site[] }) {
   // can be opened).
   let escapedAt = -Infinity;
   onShortcut((e) => {
-    if (e.key !== "Escape" || e.repeat || e.shiftKey) return;
+    if (e.key !== "Escape" || e.repeat) return;
     const now = performance.now();
     if (now - escapedAt < 400) {
       escapedAt = -Infinity;
-      document.querySelector<HTMLElement>(".sidebar .host-name:not(:disabled)")?.focus();
+      document.querySelector<HTMLElement>(".sidebar a.host-name")?.focus();
     } else {
       escapedAt = now;
     }
@@ -178,13 +189,7 @@ export function App(props: { sites: Site[] }) {
           <div class="sidebar-top">
             <p>
               <strong>Vigil</strong> is an app for privacy-unfriendly analytics, designed by{" "}
-              <a
-                style={{ color: "inherit", "text-underline-offset": "3px" }}
-                href="https://joodaloop.com"
-              >
-                Judah
-              </a>
-              .
+              <a href="https://joodaloop.com">Judah</a>.
             </p>
             {/* The day hovered on the sidebar's charts, in its place while
                 there is one, with every host's views (or engaged views) and
@@ -193,14 +198,7 @@ export function App(props: { sites: Site[] }) {
               when={sidebarDay() !== null}
               fallback={
                 <p>
-                  Clone it on{" "}
-                  <a
-                    style={{ color: "inherit", "text-underline-offset": "3px" }}
-                    href="https://github.com/joodaloop/vigil"
-                  >
-                    Github
-                  </a>{" "}
-                  to use it.
+                  Clone it on <a href="https://github.com/joodaloop/vigil">Github</a> to use it.
                 </p>
               }
             >
@@ -239,16 +237,25 @@ export function App(props: { sites: Site[] }) {
                 };
                 return (
                   <div class="host-item">
-                    {/* Only the name opens it. */}
-                    <button
-                      class="host-name"
-                      aria-pressed={open() ? "true" : "false"}
-                      title={h.host}
-                      disabled={empty()}
-                      onClick={() => open() || update({ host: h.host })}
+                    {/* Only the name opens it: a link, unless there's nothing to show. */}
+                    <Show
+                      when={!empty()}
+                      fallback={
+                        <span class="host-name" title={h.host}>
+                          {h.name}
+                        </span>
+                      }
                     >
-                      {h.name}
-                    </button>
+                      <a
+                        class="host-name"
+                        href={hrefFor({ host: h.host })}
+                        aria-current={open() ? "page" : undefined}
+                        title={h.host}
+                        onClick={(e) => follow(e, { host: h.host })}
+                      >
+                        {h.name}
+                      </a>
+                    </Show>
                     <Show when={!empty()} fallback={<span class="muted">No stats yet</span>}>
                       <span class="host-nums">
                         <span class="host-counts">
@@ -282,7 +289,7 @@ export function App(props: { sites: Site[] }) {
         <section class={["panel", { updating: updating() }]}>
           <Errored
             fallback={(e) => (
-              <p class="muted error">
+              <p class="muted error" role="alert">
                 Couldn't load stats: {String((e() as Error)?.message ?? e())}
               </p>
             )}
@@ -306,6 +313,8 @@ export function App(props: { sites: Site[] }) {
                 source: view().q.source,
               }}
               onFilter={update}
+              filterHref={hrefFor}
+              onFollow={follow}
               ago={view().q.ago}
               onPeriod={(days, ago) => update({ days, ago })}
               updating={updating()}
@@ -329,6 +338,8 @@ function Stats(props: {
   rows: { pages: number; referrers: number }; // each list's rows, unfiltered
   filters: Filters;
   onFilter: (change: Partial<Filters>) => void;
+  filterHref: (change: Partial<Filters>) => string; // the address a filter's link goes to
+  onFollow: (e: MouseEvent, change: Partial<Filters>) => void; // a click on that link
   ago: number; // how many days before today the period ends
   onPeriod: (days: number, ago: number) => void; // a period picked (see periods)
   updating: boolean; // new stats on their way
@@ -383,15 +394,49 @@ function Stats(props: {
   // Backspace clears every filter, "[" and "]" pick the period before and
   // after this one, and "\" the most recent. While new stats load, "[" and
   // "]" do nothing, as they'd only pick from the period still shown.
-  // Both remembered in this browser.
+  // Both remembered in this browser. On a touch screen, a double tap
+  // switches percentages and a triple tap addresses.
   const [asPct, setAsPct] = storedFlag("vigil:percentages", false);
   const [asAddress, setAsAddress] = storedFlag("vigil:addresses", false);
-  // While a day is pinned, the left and right arrows move the pin to the
-  // day before and after (round from one end to the other); while none is,
-  // right pins the first day and left the last. Escape unpins it.
+  onTaps((n) => {
+    if (n === 2) setAsPct((p) => !p);
+    else if (n === 3) setAsAddress((a) => !a);
+  });
+  // What changed, for screen readers (in a polite status region below): a
+  // day pinned or unpinned, with its numbers; percentages, addresses or
+  // engaged mode switched; new stats loading and landing.
+  const [status, setStatus] = createSignal("");
+  const announce = <T,>(source: () => T, message: (v: T) => string | null) => {
+    let first = true;
+    createEffect(source, (v) => {
+      if (first) return void (first = false);
+      const m = message(v);
+      if (m !== null) setStatus(m);
+    });
+  };
+  announce(
+    () => indexOf(pinned()),
+    (i) =>
+      i < 0
+        ? "Day unpinned"
+        : `${dayOf(props.days[i] * 1000, true)}: ${num(st().views)} page views, ${num(st().new)} new devices`,
+  );
+  announce(asPct, (on) => (on ? "Showing percentages" : "Showing numbers"));
+  announce(asAddress, (on) => (on ? "Showing addresses" : "Showing names"));
+  announce(
+    () => props.engaged,
+    (on) => (on ? "Showing engaged views" : "Showing all views"),
+  );
+  announce(
+    () => props.updating,
+    (on) => (on ? "Loading" : "Loaded"),
+  );
+  // While a day is pinned, "-" and "=" move the pin to the day before and
+  // after (round from one end to the other); while none is, "=" pins the
+  // first day and "-" the last. Escape unpins it.
   onShortcut((e) => {
-    if (e.shiftKey || props.days.length === 0) return;
-    const by = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+    if (props.days.length === 0) return;
+    const by = { "-": -1, "=": 1 }[e.key];
     if (by !== undefined) {
       e.preventDefault();
       const from = indexOf(pinned());
@@ -401,6 +446,14 @@ function Stats(props: {
       setPinned(null);
     }
   });
+  // "1", "2" and "3" focus the first row shown of the pages and the
+  // referrers, and the first country.
+  onShortcut((e) => {
+    const list = { "1": ".pages .paged", "2": ".referrers .paged", "3": ".countries" }[e.key];
+    if (!list || e.repeat) return;
+    e.preventDefault();
+    (document.querySelector(`${list} > *`) as HTMLElement | null)?.focus();
+  });
   onShortcut((e) => {
     if (e.key === "." && !e.repeat) {
       setAsPct((p) => !p);
@@ -409,12 +462,12 @@ function Stats(props: {
     } else if (e.key === "/" && !e.repeat) {
       e.preventDefault(); // or Firefox opens its quick find
       props.onEngaged();
-    } else if (e.key === "Backspace" && !e.repeat && !e.shiftKey) {
+    } else if (e.key === "Backspace" && !e.repeat) {
       const f = props.filters;
       if (f.page === null && f.source === null && f.country === null) return;
       e.preventDefault();
       props.onFilter({ page: null, source: null, country: null });
-    } else if (!e.shiftKey && (e.key === "[" || e.key === "]" || e.key === "\\")) {
+    } else if (e.key === "[" || e.key === "]" || e.key === "\\") {
       // Most recent first, so earlier is further down the list. A period
       // not in it goes to the most recent.
       const list = periods();
@@ -430,130 +483,141 @@ function Stats(props: {
 
   return (
     <div class={["stats", { pct: asPct(), address: asAddress() }]}>
-      <div class="stats-main">
-        {/* Name and address on the left, totals on the right. */}
-        <div class="stats-head">
-          <div class="host-title">
-            <h1>{props.name}</h1>
-            <span class="host-url" title={`https://${props.host}/`}>
-              {props.host}
-            </span>
-            {/* The period's name ("Last 30 days", "September 2026"), or for
-                any other period its first and last days, which picks
-                another period; then the day hovered, if any. */}
-            <div class="host-period">
-              <div class="host-dates">
-                <span class="dates-text" aria-hidden="true">
-                  {periods().find((p) => p.key === periodKey(props.days.length, props.ago))
-                    ?.label ??
-                    fullDate.formatRange(
-                      props.days[0] * 1000,
-                      props.days[props.days.length - 1] * 1000,
-                    )}
-                </span>
-                <select
-                  aria-label="Period"
-                  value={periodKey(props.days.length, props.ago)}
-                  onChange={(e) => {
-                    const [days, ago] = e.currentTarget.value.split(" ").map(Number);
-                    props.onPeriod(days, ago);
-                  }}
-                >
-                  <For each={periods()}>{(p) => <option value={p.key}>{p.label}</option>}</For>
-                </select>
+      <p class="sr-only" role="status">
+        {status()}
+      </p>
+      {/* The numbers, chart and lists at the top; the visitors at the foot. */}
+      <div class="stats-top">
+        <div class="stats-main">
+          {/* Name and address on the left, totals on the right. */}
+          <div class="stats-head">
+            <div class="host-title">
+              <h1>{props.name}</h1>
+              <span class="host-url" title={`https://${props.host}/`}>
+                {props.host}
+              </span>
+              {/* The period's name ("Last 30 days", "September 2026"), or for
+                  any other period its first and last days, which picks
+                  another period; then the day hovered, if any. */}
+              <div class="host-period">
+                <div class="host-dates">
+                  <span class="dates-text" aria-hidden="true">
+                    {periods().find((p) => p.key === periodKey(props.days.length, props.ago))
+                      ?.label ??
+                      fullDate.formatRange(
+                        props.days[0] * 1000,
+                        props.days[props.days.length - 1] * 1000,
+                      )}
+                  </span>
+                  <select
+                    aria-label="Period"
+                    value={periodKey(props.days.length, props.ago)}
+                    onChange={(e) => {
+                      const [days, ago] = e.currentTarget.value.split(" ").map(Number);
+                      props.onPeriod(days, ago);
+                    }}
+                  >
+                    <For each={periods()}>{(p) => <option value={p.key}>{p.label}</option>}</For>
+                  </select>
+                </div>
+                <Show when={day() !== null}>
+                  <span class="host-day">
+                    — {dayOf(props.days[day()!] * 1000, !isMonth(props.days.length, props.ago))}
+                  </span>
+                </Show>
               </div>
-              <Show when={day() !== null}>
-                <span class="host-day">
-                  — {dayOf(props.days[day()!] * 1000, !isMonth(props.days.length, props.ago))}
-                </span>
-              </Show>
+            </div>
+            {/* While a day is hovered: its numbers. */}
+            <div class="totals">
+              <div class="total" style={{ color: theme.stats.views }}>
+                <div class="big">{num(st().views)}</div>
+                <div class="big-label">Page views</div>
+                {/* Read: visible for long enough (30s unless the tracker's
+                    data-read-after says otherwise). */}
+                {/* Clicking it shows engaged views in place of views
+                    everywhere (engaged mode), until it's clicked again. */}
+                <div class="sub">
+                  <button
+                    class="engaged-toggle"
+                    aria-pressed={props.engaged ? "true" : "false"}
+                    title="Engaged: views that stayed on screen long enough"
+                    onClick={props.onEngaged}
+                  >
+                    {/* Only the form shown (unlike the other numbers, which
+                        keep both), so the button is as wide as its text. */}
+                    {asPct()
+                      ? `${pct(st().reads, st().views)}% engaged`
+                      : `${num(st().reads)} engaged`}
+                  </button>
+                </div>
+              </div>
+              <div class="total" style={{ color: theme.stats.new }}>
+                <div class="big">{num(st().new)}</div>
+                <div class="big-label">New devices</div>
+                {/* Only known for the whole period, so hidden while a day is
+                    hovered (see .period-only). */}
+                <div class="sub period-only" inert={day() !== null}>
+                  <span
+                    class="count"
+                    title={`Bounced: ${num(t().newBounced)} devices that opened one page and never came back`}
+                  >
+                    <span class="main-form">{num(t().newBounced)} bounced</span>
+                    <span class="alt-form">{pct(t().newBounced, t().new)}% bounced</span>
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
-          {/* While a day is hovered: its numbers. */}
-          <div class="totals">
-            <div class="total" style={{ color: theme.stats.views }}>
-              <div class="big">{num(st().views)}</div>
-              <div class="big-label">Page views</div>
-              {/* Read: visible for long enough (30s unless the tracker's
-                  data-read-after says otherwise). */}
-              {/* Clicking it shows engaged views in place of views
-                  everywhere (engaged mode), until it's clicked again. */}
-              <div class="sub">
-                <button
-                  class="engaged-toggle"
-                  aria-pressed={props.engaged ? "true" : "false"}
-                  title="Engaged: views that stayed on screen long enough"
-                  onClick={props.onEngaged}
-                >
-                  {/* Only the form shown (unlike the other numbers, which
-                      keep both), so the button is as wide as its text. */}
-                  {asPct()
-                    ? `${pct(st().reads, st().views)}% engaged`
-                    : `${num(st().reads)} engaged`}
-                </button>
-              </div>
-            </div>
-            <div class="total" style={{ color: theme.stats.new }}>
-              <div class="big">{num(st().new)}</div>
-              <div class="big-label">New devices</div>
-              {/* Only known for the whole period, so hidden while a day is
-                  hovered (see .period-only). */}
-              <div class="sub period-only" inert={day() !== null}>
-                <span
-                  class="count"
-                  title={`Bounced: ${num(t().newBounced)} devices that opened one page and never came back`}
-                >
-                  <span class="main-form">{num(t().newBounced)} bounced</span>
-                  <span class="alt-form">{pct(t().newBounced, t().new)}% bounced</span>
-                </span>
-              </div>
-            </div>
-          </div>
+
+          <Chart
+            days={props.days}
+            lines={
+              // Views and new visitors, each over a light fill; in engaged
+              // mode, with engaged views filled solid under the views.
+              [
+                ...viewLines(
+                  props.stats.daily.views,
+                  props.engaged ? props.stats.daily.reads : null,
+                ),
+                ...filled(props.stats.daily.new, theme.stats.new),
+              ]
+            }
+            maxes={maxes()}
+            height={160}
+            headroom={8}
+            lineWidth={2}
+            hoverDelay={50}
+            onHover={onHover}
+            pinned={pinned()}
+            onPin={setPinned}
+            marked={day()}
+          />
         </div>
 
-        <Chart
-          days={props.days}
-          lines={
-            // Views and new visitors, each over a light fill; in engaged
-            // mode, with engaged views filled solid under the views.
-            [
-              ...viewLines(props.stats.daily.views, props.engaged ? props.stats.daily.reads : null),
-              ...filled(props.stats.daily.new, theme.stats.new),
-            ]
-          }
-          maxes={maxes()}
-          height={160}
-          headroom={8}
-          lineWidth={2}
-          hoverDelay={50}
-          onHover={onHover}
-          pinned={pinned()}
-          onPin={setPinned}
-          marked={day()}
-        />
-      </div>
-
-      <div class="lists">
-        <Pages
-          items={shown().pages}
-          rows={props.rows.pages}
-          maxes={listMaxes()}
-          days={props.days}
-          engaged={props.engaged}
-          picked={props.filters.page}
-          onPick={(page) => props.onFilter({ page })}
-        />
-        <Referrers
-          items={shown().referrers}
-          maxes={listMaxes()}
-          rows={props.rows.referrers}
-          host={props.host}
-          icon={props.icon}
-          days={props.days}
-          engaged={props.engaged}
-          picked={props.filters.source}
-          onPick={(source) => props.onFilter({ source })}
-        />
+        <div class="lists">
+          <Pages
+            items={shown().pages}
+            rows={props.rows.pages}
+            maxes={listMaxes()}
+            days={props.days}
+            engaged={props.engaged}
+            picked={props.filters.page}
+            href={(page) => props.filterHref({ page })}
+            onPick={(e, page) => props.onFollow(e, { page })}
+          />
+          <Referrers
+            items={shown().referrers}
+            maxes={listMaxes()}
+            rows={props.rows.referrers}
+            host={props.host}
+            icon={props.icon}
+            days={props.days}
+            engaged={props.engaged}
+            picked={props.filters.source}
+            href={(source) => props.filterHref({ source })}
+            onPick={(e, source) => props.onFollow(e, { source })}
+          />
+        </div>
       </div>
 
       <People
@@ -565,7 +629,8 @@ function Stats(props: {
         onHover={onHover}
         onPin={setPinned}
         picked={props.filters.country}
-        onPick={(country) => props.onFilter({ country })}
+        href={(country) => props.filterHref({ country })}
+        onPick={(e, country) => props.onFollow(e, { country })}
       />
     </div>
   );

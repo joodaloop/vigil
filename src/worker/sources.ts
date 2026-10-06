@@ -172,7 +172,13 @@ async function readHead(url: string | URL) {
 // (a 404, though with a placeholder image, which a browser would show), an
 // empty 404, cached for a day, so the dashboard shows its own icon instead.
 export async function handleIcon(url: URL, env: Env): Promise<Response> {
-    const domain = decodeURIComponent(url.pathname.slice("/api/icon/".length)).toLowerCase();
+    let domain: string;
+    try {
+        domain = decodeURIComponent(url.pathname.slice("/api/icon/".length)).toLowerCase();
+    } catch {
+        // A malformed escape, e.g. "%E0": no such domain.
+        return new Response(null, { status: 404 });
+    }
     const row = await env.DB.prepare(`SELECT icon, icon_type FROM sources WHERE domain = ?1 AND icon IS NOT NULL`)
         .bind(domain)
         .first<{ icon: ArrayBuffer | number[]; icon_type: string }>();

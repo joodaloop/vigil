@@ -78,10 +78,12 @@ CREATE TABLE IF NOT EXISTS visitors (
 ) STRICT, WITHOUT ROWID;
 
 -- Everything the dashboard's visitor counts need, so they read only this.
--- (It replaced visitors_recent and visitors_seen, which lacked country and OS.)
+-- (It replaced visitors_recent and visitors_seen, which lacked country and
+-- OS, and then visitors_period, which lacked browser.)
 DROP INDEX IF EXISTS visitors_recent;
 DROP INDEX IF EXISTS visitors_seen;
-CREATE INDEX IF NOT EXISTS visitors_period ON visitors (host, last_ts, first_ts, device, country, os);
+DROP INDEX IF EXISTS visitors_period;
+CREATE INDEX IF NOT EXISTS visitors_in_period ON visitors (host, last_ts, first_ts, device, country, os, browser);
 
 
 -- -----------------------------------------------------------------------------

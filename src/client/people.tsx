@@ -2,15 +2,16 @@ import { createMemo, For } from "solid-js";
 import type { HostStats } from "../shared/types";
 import { Chart, filled, peak } from "./Chart";
 import { num, pct, perDevice } from "./format";
-import { DeviceIcon, OsIcon } from "./icons";
+import { DeviceIcon, StatIcon } from "./icons";
+import { arrowStep, createRoving, focusAt, indexIn } from "./keys";
 import { theme } from "./theme";
 
 // Visitors: their number and devices on one side and the countries they came
 // from on the other, then their chart across the panel. While a day is
 // hovered on the main chart (`day`, with `stats` as of it), the number and
 // pages per device are that day's, and it's marked on the chart. Picking a
-// country's flag filters by it (`onPick`), or if it's the one `picked`,
-// clears that filter.
+// country's flag (a link, `href`) filters by it (`onPick`), or if it's the
+// one `picked`, clears that filter.
 export function People(props: {
   host: string;
   stats: HostStats;
@@ -20,7 +21,8 @@ export function People(props: {
   onHover: (i: number | null) => void;
   onPin: (day: number | null) => void;
   picked: string | null;
-  onPick: (code: string | null) => void;
+  href: (code: string | null) => string;
+  onPick: (e: MouseEvent, code: string | null) => void;
 }) {
   const t = () => props.stats.totals;
   const devices = () => t().devices;
@@ -56,6 +58,7 @@ export function People(props: {
                 {(d) => (
                   <span title={`${d.name}: ${pct(devices()[d.key], t().visitors)}%`}>
                     <DeviceIcon w={d.w} h={d.h} />
+                    <span class="sr-only">{d.name}</span>
                     <Share part={devices()[d.key]} whole={t().visitors} />
                   </span>
                 )}
@@ -66,8 +69,21 @@ export function People(props: {
               <For each={[...SYSTEMS].sort((a, b) => t().systems[b[0]] - t().systems[a[0]])}>
                 {([key, name]) => (
                   <span title={`${name}: ${pct(t().systems[key], t().systems.known)}%`}>
-                    <OsIcon name={key} />
+                    <StatIcon name={key} />
+                    <span class="sr-only">{name}</span>
                     <Share part={t().systems[key]} whole={t().systems.known} />
+                  </span>
+                )}
+              </For>
+            </div>
+            {/* Shares of the visitors whose browser is known, by its engine. */}
+            <div class="sub stacked icons engines period-only" inert={dayShown()}>
+              <For each={[...ENGINES].sort((a, b) => t().engines[b[0]] - t().engines[a[0]])}>
+                {([key, name]) => (
+                  <span title={`${name}: ${pct(t().engines[key], t().engines.known)}%`}>
+                    <StatIcon name={key} />
+                    <span class="sr-only">{name}</span>
+                    <Share part={t().engines[key]} whole={t().engines.known} />
                   </span>
                 )}
               </For>
@@ -75,14 +91,15 @@ export function People(props: {
           </div>
         </div>
         <div class="period-only" inert={dayShown()}>
-          <Countries items={t().countries} picked={props.picked} onPick={props.onPick} />
+          <Countries items={t().countries} picked={props.picked} href={props.href} onPick={props.onPick} />
         </div>
       </div>
       <Chart
         days={props.days}
         lines={lines()}
         maxes={maxes()}
-        height={120}
+        height={100}
+        headroom={20}
         lineWidth={2}
         hoverDelay={50}
         onHover={props.onHover}
@@ -133,13 +150,16 @@ function countryName(code: string) {
 
 // A row of flags for the countries visitors came from (the top 16), each with
 // an area proportional to its visitors relative to the top one (at least 8px
-// tall), and its name and numbers on hover. Each is a button that filters by
+// tall), and its name and numbers on hover. Each is a link that filters by
 // its country, or if it's the one `picked`, clears that filter; the picked
-// one is always there, smallest if no one came from it.
+// one is always there, smallest if no one came from it. The flags are one
+// tab stop (see createRoving); from one, the up and down arrows move to the
+// one before and after.
 function Countries(props: {
   items: { code: string; visitors: number }[];
   picked: string | null;
-  onPick: (code: string | null) => void;
+  href: (code: string | null) => string;
+  onPick: (e: MouseEvent, code: string | null) => void;
 }) {
   const shown = () => {
     const top = props.items.filter((c) => flag(c.code)).slice(0, 16);
@@ -149,23 +169,36 @@ function Countries(props: {
       : [...top, { code: p, visitors: 0 }];
   };
   const total = () => props.items.reduce((n, c) => n + c.visitors, 0);
+  const roving = createRoving();
   return (
-    <div class="countries">
+    <div
+      class="countries"
+      onFocusIn={roving.onFocusIn}
+      onKeyDown={(e) => {
+        const by = arrowStep(e, "y");
+        const at = indexIn(e.currentTarget, e.target as Node);
+        if (by === null || at < 0) return;
+        e.preventDefault(); // or the arrows would scroll the page
+        if (at + by >= 0) focusAt(e.currentTarget, at + by);
+      }}
+    >
       <For each={shown()}>
-        {(c) => {
+        {(c, i) => {
           const name = () => countryName(c.code);
           return (
-            <button
+            <a
+              href={props.href(c.code === props.picked ? null : c.code)}
               title={`${name()}: ${num(c.visitors)} visitors (${pct(c.visitors, total())}%)`}
-              aria-pressed={c.code === props.picked ? "true" : "false"}
-              onClick={() => props.onPick(c.code === props.picked ? null : c.code)}
+              aria-current={c.code === props.picked ? "true" : undefined}
+              tabindex={roving.tabindex(i(), shown().length)}
+              onClick={(e) => props.onPick(e, c.code === props.picked ? null : c.code)}
             >
               <img
                 src={flag(c.code)}
                 alt={name()}
                 height={Math.max(8, Math.round(40 * Math.sqrt(c.visitors / (shown()[0].visitors || 1))))}
               />
-            </button>
+            </a>
           );
         }}
       </For>
@@ -181,6 +214,13 @@ const DEVICES = [
 ] as const;
 
 // The operating systems shown beside the devices.
+// The browser engines, each named with the browsers that use it.
+const ENGINES = [
+  ["blink", "Blink (Chrome, Edge and others)"],
+  ["webkit", "WebKit (Safari, and every iOS browser)"],
+  ["gecko", "Gecko (Firefox)"],
+] as const;
+
 const SYSTEMS = [
   ["windows", "Windows"],
   ["mac", "macOS"],

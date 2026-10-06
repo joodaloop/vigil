@@ -270,11 +270,11 @@ test("visitors under a filter match a scan of the hits, through the covering ind
                 assert.deepEqual(
                     sorted(all(f.people, numbered(f.people, f.params))),
                     sorted(all(
-                        `SELECT v.device, v.country, v.os, COUNT(*) AS visitors,
+                        `SELECT v.device, v.country, v.os, v.browser, COUNT(*) AS visitors,
                                 SUM((SELECT MIN(ts) / 86400 FROM hits p WHERE p.host = v.host AND p.visitor_id = v.id) >= ?
                                     AND (SELECT COUNT(*) FROM hits p WHERE p.host = v.host AND p.visitor_id = v.id) = 1) AS bounced
                          FROM (SELECT DISTINCT visitor_id FROM hits ${match}) f
-                         JOIN visitors v ON v.host = ? AND v.id = f.visitor_id GROUP BY v.device, v.country, v.os`,
+                         JOIN visitors v ON v.host = ? AND v.id = f.visitor_id GROUP BY v.device, v.country, v.os, v.browser`,
                         [first, ...params, host],
                     )),
                     label,

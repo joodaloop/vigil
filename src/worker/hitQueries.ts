@@ -29,13 +29,13 @@ export function filteredVisitors(host: string, firstDay: number, filters: Filter
         params,
         // Per day, for the chart.
         daily: `SELECT ts / 86400 AS day, COUNT(DISTINCT visitor_id) AS visitors ${HITS} GROUP BY day`,
-        // Over the period, by device, country and OS, with those new in it
+        // Over the period, by device, country, OS and browser, with those new in it
         // who never came back.
-        people: `SELECT v.device, v.country, v.os, COUNT(*) AS visitors,
+        people: `SELECT v.device, v.country, v.os, v.browser, COUNT(*) AS visitors,
                         SUM(v.first_ts >= ?2 AND v.first_ts = v.last_ts) AS bounced
                  FROM (SELECT DISTINCT visitor_id ${HITS}) f
                  JOIN visitors v ON v.host = ?1 AND v.id = f.visitor_id
-                 GROUP BY v.device, v.country, v.os`,
+                 GROUP BY v.device, v.country, v.os, v.browser`,
     };
 }
 

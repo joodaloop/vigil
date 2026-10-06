@@ -91,9 +91,10 @@ const wobble = (spread: number, ...key: (string | number)[]) => 1 + (rand(...key
 const today = () => Math.floor(Date.now() / 1000 / 86400);
 const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
 
-// Visitors' devices and systems, as shares.
+// Visitors' devices, systems and browser engines, as shares.
 const DEVICES = { desktop: 0.58, mobile: 0.38, tablet: 0.04 };
 const SYSTEMS = { windows: 0.3, mac: 0.27, ios: 0.2, android: 0.17, linux: 0.06 };
+const ENGINES = { blink: 0.66, webkit: 0.28, gecko: 0.06 };
 
 // A site's views on a UTC day: busier on weekdays, growing over the year.
 function siteViews(host: string, day: number) {
@@ -207,6 +208,7 @@ function make(host: string, n: number, ago: number): { dayNums: number[]; stats:
     newBounced: Math.round(sum(fresh) * (0.5 + rand(host, "bounce") * 0.15)),
     devices: split(visitors, DEVICES, host),
     systems: { ...split(visitors * 0.97, SYSTEMS, host), known: Math.round(visitors * 0.97) },
+    engines: { ...split(visitors * 0.98, ENGINES, host), known: Math.round(visitors * 0.98) },
     countries: COUNTRIES.map(([code]) => ({ code, visitors: Math.round(visitors * 0.92 * countryShares.get(code)!) }))
       .filter((c) => c.visitors > 0)
       .sort((a, b) => b.visitors - a.visitors),
@@ -288,6 +290,7 @@ function filtered(host: string, n: number, ago: number, f: Filters): HostStats {
       newBounced: Math.round(t.newBounced * all),
       devices: split(visitors, DEVICES, host + key),
       systems: { ...split(visitors * 0.97, SYSTEMS, host + key), known: Math.round(visitors * 0.97) },
+      engines: { ...split(visitors * 0.98, ENGINES, host + key), known: Math.round(visitors * 0.98) },
       countries: (country ? [country] : f.country ? [] : t.countries)
         .map((c) => ({ code: c.code, visitors: Math.round(c.visitors * pageShare * sourceShare * off(c.code, !!country)) }))
         .filter((c) => c.visitors > 0)
