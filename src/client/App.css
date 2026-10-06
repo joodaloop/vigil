@@ -421,11 +421,6 @@ h1 {
   margin-top: 2rem;
 }
 
-/* The last thing in the panel, so its fill reaches the panel's bottom. */
-.people > .chart {
-  margin-top: 1rem;
-}
-
 .people-head {
   display: flex;
   justify-content: space-between;
