@@ -60,11 +60,13 @@ export async function handleHit(request: Request, env: Env): Promise<Response> {
 
     // Where the view came from: the referring site's domain, or on a click
     // within the site, the previous page's path (paths start with "/", so
-    // the two never mix). Empty for direct visits.
+    // the two never mix). Empty for direct visits, and for the page itself
+    // (a reload by link, or "/x" and "/x/", which the dashboard shows alike).
     const ref = parseUrl(body.r);
     const refHost = ref?.hostname.toLowerCase();
+    const trim = (p: string) => p.replace(/\/+$/, "");
     let source = "";
-    if (refHost === host) source = ref!.pathname.slice(0, 1024);
+    if (refHost === host) source = trim(ref!.pathname) === trim(path) ? "" : ref!.pathname.slice(0, 1024);
     else if (refHost) source = canonicalSource(refHost.replace(/^www\./, ""));
     const ua = new UAParser(request.headers.get("user-agent") ?? undefined);
     const visitorId = (await readVisitor(request, env.COOKIE_SECRET)) ?? newVisitorId();
