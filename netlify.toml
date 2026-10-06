@@ -1,0 +1,4 @@
+# Deploys the demo: the dashboard alone, as static files (see vite.config.ts).
+[build]
+  command = "pnpm build:demo"
+  publish = "dist/demo"
