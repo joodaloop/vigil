@@ -15,6 +15,7 @@ export function Pages(props: {
   maxes: Record<string, number>; // the sparklines' scale (see List)
   days: number[];
   engaged: boolean;
+  none?: string; // in place of the rows, if there are none
   picked: string | null;
   href: (path: string | null) => string;
   onPick: (e: MouseEvent, path: string | null) => void;
@@ -29,6 +30,7 @@ export function Pages(props: {
       blank={(path) => ({ path, ...noViews(props.days) })}
       days={props.days}
       engaged={props.engaged}
+      none={props.none}
       picked={props.picked}
       href={props.href}
       onPick={props.onPick}
@@ -59,6 +61,7 @@ export function Referrers(props: {
   icon?: number; // the site's saved favicon's version, for its own pages
   days: number[];
   engaged: boolean;
+  none?: string; // in place of the rows, if there are none
   picked: string | null;
   href: (source: string | null) => string;
   onPick: (e: MouseEvent, source: string | null) => void;
@@ -74,6 +77,7 @@ export function Referrers(props: {
       blank={(source) => ({ source, ...noViews(props.days) })}
       days={props.days}
       engaged={props.engaged}
+      none={props.none}
       picked={props.picked}
       href={props.href}
       onPick={props.onPick}
@@ -102,6 +106,7 @@ export function Referrers(props: {
 // always there to clear it: one with no views (`blank`) if it's not in
 // `items` (nothing in the period). Filtered down to it, it stays where it
 // was on its page when it was clicked, rather than moving up to the top.
+// With no rows (a day with none), it shows `none` instead.
 function List<T extends { views: number; new: number; reads: number; daily: number[]; dailyReads: number[] }>(props: {
   class: string;
   maxes: Record<string, number>;
@@ -113,6 +118,7 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
   label: (item: T) => JSX.Element;
   days: number[];
   engaged: boolean;
+  none?: string;
   picked: string | null;
   href: (key: string | null) => string;
   onPick: (e: MouseEvent, key: string | null) => void;
@@ -136,7 +142,13 @@ function List<T extends { views: number; new: number; reads: number; daily: numb
   const newTotal = createMemo(() => items().reduce((n, x) => n + x.new, 0));
   return (
     <div class={props.class}>
-      <Paged items={items()} key={props.key} offset={offset()} minRows={props.rows}>
+      <Paged
+        items={items()}
+        key={props.key}
+        offset={offset()}
+        minRows={props.rows}
+        empty={<p class="muted none">{props.none}</p>}
+      >
         {(x, tabindex) => {
           // The row's sparkline, only new when its series are (not when a
           // day is hovered, which leaves them be) or engaged mode changes; a
@@ -230,7 +242,8 @@ const noViews = (days: number[]) => ({
 // included, however few items there are. Rows are matched by `key`, so one stays the same element as its
 // data changes. Whenever the rows come in another order (a day hovered or
 // pinned, another site or period), it's back to the first page. `offset`
-// leaves that many empty rows above the first.
+// leaves that many empty rows above the first, and `empty` is shown in the
+// rows' place when there are none.
 // The rows are one tab stop, and so are the page buttons (see createRoving):
 // each child is given its tabindex. From a row, the up and down arrows move
 // to the row above and below, on through to the pages before and after, and
@@ -243,6 +256,7 @@ function Paged<T>(props: {
   key: (item: T) => string;
   offset?: number; // empty rows above the first
   minRows?: number; // the fewest rows' height it takes, up to a page (all of one, by default)
+  empty?: JSX.Element;
   children: (item: () => T, tabindex: () => number) => JSX.Element;
 }) {
   const size = () => props.size ?? 10;
@@ -303,9 +317,11 @@ function Paged<T>(props: {
         onFocusIn={roving.onFocusIn}
         style={{ "--rows": Math.min(size(), props.minRows ?? size()), "--offset": props.offset ?? 0 }}
       >
-        <For each={shown()} keyed={props.key}>
-          {(item, i) => props.children(item, () => roving.tabindex(i(), shown().length))}
-        </For>
+        <Show when={props.items.length > 0} fallback={props.empty}>
+          <For each={shown()} keyed={props.key}>
+            {(item, i) => props.children(item, () => roving.tabindex(i(), shown().length))}
+          </For>
+        </Show>
       </div>
       <div class="pager" onKeyDown={onPagerKey}>
         <Show when={pages() > 1}>

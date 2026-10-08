@@ -385,7 +385,7 @@ h1 {
   display: flex;
   flex: 1;
   flex-direction: column;
-  justify-content: space-between;
+  gap: 2.5rem;
 }
 
 .stats-main {
@@ -413,12 +413,6 @@ h1 {
   gap: 1.5rem;
   text-align: right;
   padding-top: 8px;
-}
-
-/* Visitors, under the lists: their numbers and countries at either end,
-   then their chart running to the panel's edges like the main one. */
-.people {
-  margin-top: 2rem;
 }
 
 .people-head {
@@ -690,6 +684,12 @@ select option {
 .paged {
   min-height: calc(var(--rows) * var(--row));
   padding-top: calc(var(--offset) * var(--row));
+}
+
+/* In place of a list's rows, on a day with none. */
+.none {
+  margin: 0;
+  line-height: var(--row);
 }
 
 /* A page or referrer: its name, a sparkline of its views, then its views

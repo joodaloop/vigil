@@ -41,8 +41,7 @@ export function peak(key: string, max: number) {
 const scaleTop = (max: number) => (max > 0 ? max * 1.05 : 1);
 
 // Padding above and below the plot, so thick lines along its top and bottom
-// aren't clipped. None at the sides, where the lines run on past the ends
-// (see the placeholder days), so the plot reaches the chart's edges.
+// aren't clipped. None at the sides, so the plot reaches the chart's edges.
 const chartPadding = (lineWidth: number) => Math.ceil(lineWidth);
 
 // A bare line chart: no axes, grid, legend or cursor. Lines on the same scale
@@ -52,15 +51,11 @@ const chartPadding = (lineWidth: number) => Math.ceil(lineWidth);
 // `headroom` adds empty space (px) above the plot, which still counts for
 // hovering.
 //
-// Each chart draws a placeholder day past each end, repeating the end's
-// values, so the lines run to the edges while the first and last real days
-// sit clear of them.
-//
-// With `onHover`, hovering reports the index of the day nearest the pointer
-// (never a placeholder); null once the pointer leaves. With `hoverDelay`, a
-// mouse entering reports nothing until it comes to rest (stays still that
-// many ms), so passing across the chart doesn't; moving between days after
-// that is immediate, until it leaves.
+// With `onHover`, hovering reports the index of the day nearest the pointer;
+// null once the pointer leaves. With `hoverDelay`, a mouse entering reports
+// nothing until it comes to rest (stays still that many ms), so passing
+// across the chart doesn't; moving between days after that is immediate,
+// until it leaves.
 //
 // With `onPin` too, clicking a day reports it (unix seconds) to be pinned,
 // or null if it's `pinned` already. The pin itself is kept by the caller,
@@ -139,10 +134,10 @@ export function Chart(props: {
         });
     }
 
-    // The day nearest the pointer, never a placeholder.
+    // The day nearest the pointer.
     function dayAt(u: uPlot, e: Pick<MouseEvent, "clientX">) {
         const over = u.over.getBoundingClientRect();
-        return Math.max(0, Math.min(props.days.length - 1, u.posToIdx(e.clientX - over.left) - ends()));
+        return Math.max(0, Math.min(props.days.length - 1, u.posToIdx(e.clientX - over.left)));
     }
 
     // Reported even while a day is pinned (which the caller shows instead),
@@ -242,19 +237,6 @@ export function Chart(props: {
         else setMark(null);
     }
 
-    // Placeholder days, one before the first and one after the last: data
-    // index i is day i - 1.
-    const ends = () => (props.days.length > 0 ? 1 : 0);
-    function padded(): (number | null)[][] {
-        const days = props.days;
-        if (!ends()) return [days, ...props.lines.map((l) => l.values)];
-        const step = days.length > 1 ? days[1] - days[0] : 86400;
-        return [
-            [days[0] - step, ...days, days[days.length - 1] + step],
-            ...props.lines.map((l) => [l.values[0], ...l.values, l.values[l.values.length - 1]]),
-        ];
-    }
-
     function build() {
         plot?.destroy();
         const scales: uPlot.Scales = { x: { time: true } };
@@ -291,7 +273,7 @@ export function Chart(props: {
                 hooks: { draw: [remark] },
                 select: { show: false, left: 0, top: 0, width: 0, height: 0 },
             },
-            padded() as uPlot.AlignedData,
+            [props.days, ...props.lines.map((l) => l.values)] as uPlot.AlignedData,
             el,
         );
     }

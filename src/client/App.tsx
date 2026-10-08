@@ -365,8 +365,12 @@ function Stats(props: {
   });
   const onHover = (i: number | null) => setHovered(i === null ? null : props.days[i]);
   // In engaged mode, the lists ranked by engaged views instead.
-  const shown = createMemo(() => onDay(props.stats, day(), props.engaged));
+  const shown = createMemo(() => onDay(props.stats, day(), props.engaged, props.filters));
   const st = () => shown().totals;
+  // In place of a list's rows on a day with none (see onDay). A list can be
+  // empty for the whole period too (referrers, under a filter), left blank.
+  const none = () =>
+    day() === null ? undefined : props.engaged ? "No engaged views this day." : "No views this day.";
   // The chart's scale, the host's largest day seen yet (views are never
   // fewer than new visitors or engaged views).
   const maxes = createMemo(() => ({
@@ -599,6 +603,7 @@ function Stats(props: {
               maxes={listMaxes()}
               days={props.days}
               engaged={props.engaged}
+              none={none()}
               picked={props.filters.page}
               href={(page) => props.filterHref({ page })}
               onPick={(e, page) => props.onFollow(e, { page })}
@@ -611,6 +616,7 @@ function Stats(props: {
               icon={props.icon}
               days={props.days}
               engaged={props.engaged}
+              none={none()}
               picked={props.filters.source}
               href={(source) => props.filterHref({ source })}
               onPick={(e, source) => props.onFollow(e, { source })}
@@ -698,15 +704,22 @@ function dateOf(ms: number): string {
 // whole period stays as it is. Each list is ranked (once) as for the period
 // (pages by views, referrers by new visitors then views), or in engaged mode
 // (`engaged`), both by engaged views; ties keep the period's order. For the
-// period, unless engaged, they're already in that order.
-function onDay(stats: HostStats, day: number | null, engaged: boolean): HostStats {
+// period, unless engaged, they're already in that order. On a day, rows with
+// no views that day (engaged views, in engaged mode) are left out, but for
+// the ones picked as filters (`picked`), which keep their own sparklines.
+function onDay(stats: HostStats, day: number | null, engaged: boolean, picked: Filters): HostStats {
   type Row = PageRow | Referrer;
   const atDay = <R extends Row>(r: R): R =>
     day === null
       ? r
       : { ...r, views: r.daily[day], new: r.dailyNew[day], reads: r.dailyReads[day] };
-  const rank = <R extends Row>(rows: R[], by: (a: Row, b: Row) => number) =>
-    day === null && !engaged ? rows : rows.map(atDay).sort(by);
+  const rank = <R extends Row>(rows: R[], key: (r: R) => string, pick: string | null, by: (a: Row, b: Row) => number) =>
+    day === null && !engaged
+      ? rows
+      : rows
+          .map(atDay)
+          .filter((r) => day === null || (engaged ? r.reads : r.views) > 0 || key(r) === pick)
+          .sort(by);
   const byReads = (a: Row, b: Row) => b.reads - a.reads;
   const { daily } = stats;
   return {
@@ -721,9 +734,11 @@ function onDay(stats: HostStats, day: number | null, engaged: boolean): HostStat
             new: daily.new[day],
             visitors: daily.visitors[day],
           },
-    pages: rank(stats.pages, engaged ? byReads : (a, b) => b.views - a.views),
+    pages: rank(stats.pages, (p) => p.path, picked.page, engaged ? byReads : (a, b) => b.views - a.views),
     referrers: rank(
       stats.referrers,
+      (r) => r.source,
+      picked.source,
       engaged ? byReads : (a, b) => b.new - a.new || b.views - a.views,
     ),
   };
